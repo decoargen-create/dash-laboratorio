@@ -9,11 +9,13 @@
 // ve TODO lo publicable junto, sin navegar el tablero.
 // =========================================================================
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
-import { Rocket, Film, CheckCircle2, Clock, Settings2, ChevronRight, PackageOpen, History, ExternalLink, Loader2, RefreshCw } from 'lucide-react';
-import PublicarCampanaModal, { leerPresetPublicar } from './PublicarCampanaModal.jsx';
-import { authHeaders } from './MetaConnect.jsx';
+import { Rocket, Film, CheckCircle2, Clock, Settings2, ChevronRight, PackageOpen, History, ExternalLink, Loader2, RefreshCw, TrendingUp, ChevronDown } from 'lucide-react';
+import { leerPresetPublicar } from './PublicarCampanaModal.jsx';
+import PublicarArmador from './PublicarArmador.jsx';
+import PublicarCampana from './PublicarCampana.jsx';
+import { authHeaders, useMetaConnections, useMetaAdAccounts } from './MetaConnect.jsx';
 import {
-  listAllAssignments, subscribeProduccion, updateAssignment, weekLabel,
+  listAllAssignments, subscribeProduccion, updateAssignment, weekLabel, marcarVideosPublicados,
 } from './produccionStore.js';
 
 // ── Historial de publicaciones (lo escribe el server en cada intento) ──
@@ -88,6 +90,42 @@ function HistorialTab({ addToast }) {
   );
 }
 
+// ── ESCALAR — el wizard de recetas desde ads EXISTENTES (post ids) ─────────
+// Es OTRA cosa que publicar creativos nuevos: acá agarrás tus ads ganadores
+// (por su número de publicación) y armás campañas de escalado con las recetas
+// del equipo (CBO Deep Pocket / Cost Cap / ABO Bid Cap / ABO Cost Cap).
+// Es el wizard que vivía en Métricas → "Publicar campaña", movido acá.
+function EscalarTab({ addToast }) {
+  const { connections } = useMetaConnections();
+  const { accounts, loading } = useMetaAdAccounts(connections);
+  const [accountId, setAccountId] = useState(() => {
+    try { return localStorage.getItem('adslab-testeos-account') || ''; } catch { return ''; }
+  });
+  const account = useMemo(() => accounts.find(a => a.id === accountId) || accounts[0] || null, [accounts, accountId]);
+
+  return (
+    <div className="space-y-4">
+      <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800/60 px-4 py-3 flex items-center gap-3 flex-wrap">
+        <span className="text-[11px] font-bold uppercase text-gray-500 dark:text-gray-400 shrink-0">Cuenta publicitaria</span>
+        <div className="relative flex-1 min-w-[220px]">
+          <select value={account?.id || ''} onChange={e => setAccountId(e.target.value)}
+            className="w-full pl-3 pr-8 py-1.5 text-xs bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg appearance-none focus:outline-none focus:ring-2 focus:ring-brand-500">
+            <option value="">{loading ? 'Cargando cuentas…' : '— Elegí una cuenta —'}</option>
+            {accounts.map(a => <option key={a.id} value={a.id}>{a.name || a.id}{a.currency ? ` (${a.currency})` : ''}</option>)}
+          </select>
+          <ChevronDown size={13} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+        </div>
+        <span className="text-[11px] text-gray-400">Escalado desde ads existentes: pegás los números de publicación de tus ganadores y elegís la receta.</span>
+      </div>
+      {account ? (
+        <PublicarCampana accountId={account.id} connId={account.connId} currency={account.currency || ''} addToast={addToast} />
+      ) : (
+        <p className="text-sm text-gray-400 py-6 text-center">Elegí una cuenta publicitaria para armar la campaña de escalado.</p>
+      )}
+    </div>
+  );
+}
+
 // Videos publicables de una tarjeta: archivos con origen real (Drive o
 // storage). Los aprobados van primero — son los que el modal pre-tilda.
 function videosDe(a) {
@@ -96,7 +134,7 @@ function videosDe(a) {
 
 export default function PublicarSection({ addToast }) {
   const [, setTick] = useState(0);
-  const [tab, setTab] = useState('cola'); // 'cola' | 'historial'
+  const [tab, setTab] = useState('cola'); // 'cola' | 'escalar' | 'historial'
   useEffect(() => subscribeProduccion(() => setTick(t => t + 1)), []);
 
   const asignaciones = listAllAssignments();
@@ -120,37 +158,44 @@ export default function PublicarSection({ addToast }) {
     return { grupos: gs, enRevision: rev };
   }, [asignaciones]);
 
-  // Selección de tarjetas por grupo (default: todas tildadas).
-  const [desmarcadas, setDesmarcadas] = useState(() => new Set());
-  const toggleTarjeta = (id) => setDesmarcadas(prev => {
-    const n = new Set(prev); if (n.has(id)) n.delete(id); else n.add(id); return n;
-  });
+  // La cola ES el armador (pedido del user): primero elegís el PRODUCTO, y
+  // abajo quedan sus tarjetas (desglosables, video por video) y la galería de
+  // estáticos en miniatura — mezclás y publicás desde la misma pantalla.
+  const [productoSel, setProductoSel] = useState('');
+  const productoActivo = grupos.some(g => g.producto === productoSel) ? productoSel : (grupos[0]?.producto || '');
+  // Tarjetas del producto elegido: aprobadas Y publicadas (para repescar).
+  const tarjetasDe = useCallback((producto) => asignaciones.filter(a =>
+    (a.productoNombre || 'Sin producto').trim() === producto &&
+    ['aprobado', 'publicado'].includes(a.estado) && videosDe(a).length > 0), [asignaciones]);
 
-  // Modal: se abre con una tarjeta SINTÉTICA que junta los videos de todas
-  // las tarjetas elegidas del producto. El ts se prefija con el id de la
-  // tarjeta para que no choquen entre tarjetas (el modal lo usa solo como
-  // clave de selección).
-  const [publicando, setPublicando] = useState(null); // { producto, cardIds, a }
-  const abrirPublicar = useCallback((grupo) => {
-    const elegidas = grupo.tarjetas.filter(t => !desmarcadas.has(t.id));
-    if (elegidas.length === 0) {
-      addToast?.({ type: 'warning', message: 'Tildá al menos una tarjeta del producto.' });
-      return;
+  // Publicación OK → se marca VIDEO POR VIDEO (publicadoAd). La tarjeta pasa
+  // a Publicado recién cuando no le queda ningún video publicable sin salir:
+  // si publicaste 5 de 7, la tarjeta sigue aprobada con los 2 restantes a la
+  // vista para la próxima.
+  const alPublicar = useCallback((videosPublicados) => {
+    const porCard = new Map();
+    for (const v of (videosPublicados || [])) {
+      if (!v?.cardId || !v?.ts) continue;
+      if (!porCard.has(v.cardId)) porCard.set(v.cardId, []);
+      porCard.get(v.cardId).push(v.ts);
     }
-    const archivos = elegidas.flatMap(t => videosDe(t).map(f => ({ ...f, ts: `${t.id}:${f.ts}` })));
-    setPublicando({
-      producto: grupo.producto,
-      cardIds: elegidas.map(t => t.id),
-      a: { id: `cola-${grupo.producto}`, productoNombre: grupo.producto, archivos },
-    });
-  }, [desmarcadas, addToast]);
-
-  // Publicación OK → las tarjetas incluidas pasan solas a Publicado.
-  const alPublicar = useCallback(() => {
-    if (!publicando) return;
-    for (const id of publicando.cardIds) updateAssignment(id, { estado: 'publicado' });
-    addToast?.({ type: 'success', message: `${publicando.cardIds.length} tarjeta${publicando.cardIds.length === 1 ? '' : 's'} marcada${publicando.cardIds.length === 1 ? '' : 's'} como Publicada 🚀` });
-  }, [publicando, addToast]);
+    let marcados = 0, completas = 0;
+    for (const [cardId, tss] of porCard) {
+      const r = marcarVideosPublicados(cardId, tss);
+      marcados += r.marcados;
+      if (r.completo && r.estado === 'aprobado') {
+        updateAssignment(cardId, { estado: 'publicado' });
+        completas++;
+      }
+    }
+    if (marcados > 0) {
+      addToast?.({
+        type: 'success',
+        message: `${marcados} video${marcados === 1 ? '' : 's'} marcado${marcados === 1 ? '' : 's'} como publicado${marcados === 1 ? '' : 's'} 🚀${completas > 0 ? ` · ${completas} tarjeta${completas === 1 ? '' : 's'} completa${completas === 1 ? '' : 's'} pasó a Publicado` : ''}`,
+        duration: 6000,
+      });
+    }
+  }, [addToast]);
 
   const totalVideos = grupos.reduce((n, g) => n + g.tarjetas.reduce((m, t) => m + videosDe(t).length, 0), 0);
 
@@ -173,86 +218,64 @@ export default function PublicarSection({ addToast }) {
       </div>
 
       <div className="flex gap-1.5">
-        {[['cola', 'Cola de listos', Rocket], ['historial', 'Historial', History]].map(([k, label, Icono]) => (
+        {/* Pestañas chicas tipo filtro (prototipo 1-C elegido por el user). */}
+        {[['cola', 'Publicar', Rocket], ['escalar', 'Escalar', TrendingUp], ['historial', 'Historial', History]].map(([k, label, Icono]) => (
           <button key={k} onClick={() => setTab(k)}
-            className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-bold rounded-lg transition ${tab === k
+            className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-[12.5px] font-bold rounded-lg transition ${tab === k
               ? 'bg-brand-600 text-white'
-              : 'text-gray-600 dark:text-gray-300 border border-gray-300 dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-800'}`}>
+              : 'text-gray-500 dark:text-gray-400 border border-gray-300 dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-800'}`}>
             <Icono size={13} /> {label}
           </button>
         ))}
       </div>
 
-      {tab === 'historial' ? <HistorialTab addToast={addToast} /> : grupos.length === 0 ? (
+      {tab === 'escalar' ? <EscalarTab addToast={addToast} />
+        : tab === 'historial' ? <HistorialTab addToast={addToast} /> : grupos.length === 0 ? (
         <div className="rounded-2xl border border-dashed border-gray-300 dark:border-gray-700 p-10 text-center text-gray-500 dark:text-gray-400">
           <PackageOpen size={34} className="mx-auto mb-3 opacity-60" />
           <p className="font-semibold">No hay tarjetas aprobadas sin publicar.</p>
           <p className="text-sm mt-1">Aprobá contenido en <b>Producción</b> y aparece acá, agrupado por producto y listo para un click.</p>
         </div>
       ) : (
-        <div className="space-y-5">
-          {grupos.map(g => {
-            const preset = leerPresetPublicar(g.producto);
-            const elegidas = g.tarjetas.filter(t => !desmarcadas.has(t.id));
-            const nVideos = elegidas.reduce((m, t) => m + videosDe(t).length, 0);
-            return (
-              <div key={g.producto} className="rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800/60 overflow-hidden">
-                <div className="flex items-center justify-between gap-3 px-4 py-3 border-b border-gray-100 dark:border-gray-700/60 flex-wrap">
-                  <div className="flex items-center gap-2.5 min-w-0">
-                    <span className="text-base font-extrabold text-gray-900 dark:text-white truncate">{g.producto}</span>
-                    {preset?.adId ? (
-                      <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-700 dark:text-emerald-300 bg-emerald-500/10 border border-emerald-500/30 rounded-full px-2 py-0.5">
-                        <CheckCircle2 size={11} /> Campaña base lista
-                      </span>
-                    ) : (
-                      <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-gray-500 dark:text-gray-400 bg-gray-500/10 border border-gray-400/30 rounded-full px-2 py-0.5">
-                        <Settings2 size={11} /> Sin preset — la elegís al publicar
-                      </span>
-                    )}
-                  </div>
-                  <button onClick={() => abrirPublicar(g)} disabled={nVideos === 0}
-                    className="inline-flex items-center gap-1.5 px-3.5 py-1.5 text-sm font-bold text-white bg-brand-600 hover:bg-brand-700 rounded-lg transition disabled:opacity-50">
-                    <Rocket size={13} /> Publicar {nVideos} video{nVideos === 1 ? '' : 's'} <ChevronRight size={12} />
-                  </button>
-                </div>
-                <ul className="divide-y divide-gray-100 dark:divide-gray-700/50">
-                  {g.tarjetas.map(t => {
-                    const vids = videosDe(t);
-                    const aprob = vids.filter(f => f.aprobado).length;
-                    const incluida = !desmarcadas.has(t.id);
-                    return (
-                      <li key={t.id} className="flex items-center gap-3 px-4 py-2.5">
-                        <input type="checkbox" checked={incluida} onChange={() => toggleTarjeta(t.id)}
-                          className="w-4 h-4 accent-brand-600 cursor-pointer shrink-0" />
-                        <div className="min-w-0 flex-1">
-                          <p className={`text-sm font-semibold truncate ${incluida ? 'text-gray-800 dark:text-gray-100' : 'text-gray-400 dark:text-gray-500 line-through'}`}>
-                            {t.persona || 'Sin editor'} · {weekLabel(t.weekKey) || t.weekKey || ''}
-                          </p>
-                          {t.nota && <p className="text-xs text-gray-500 dark:text-gray-400 truncate">{t.nota}</p>}
-                        </div>
-                        <span className="inline-flex items-center gap-1 text-xs font-semibold text-gray-600 dark:text-gray-300 shrink-0">
-                          <Film size={12} /> {vids.length} video{vids.length === 1 ? '' : 's'}
-                          {aprob > 0 && aprob < vids.length && <span className="text-emerald-600 dark:text-emerald-400">({aprob} aprob.)</span>}
-                        </span>
-                      </li>
-                    );
-                  })}
-                </ul>
-              </div>
-            );
-          })}
+        <div className="space-y-4">
+          {/* 1) Elegí el PRODUCTO — chips con su cola de videos */}
+          <div className="flex items-center gap-2 flex-wrap">
+            {grupos.map(g => {
+              const nVid = g.tarjetas.reduce((m, t) => m + videosDe(t).length, 0);
+              const preset = leerPresetPublicar(g.producto);
+              const on = g.producto === productoActivo;
+              return (
+                <button key={g.producto} onClick={() => setProductoSel(g.producto)}
+                  title={preset?.adId ? 'Campaña base configurada ✓' : 'Sin campaña base todavía — se configura adentro'}
+                  className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold border transition ${on
+                    ? 'bg-brand-600/15 text-brand-700 dark:text-brand-300 border-brand-500/60 font-bold'
+                    : 'bg-white dark:bg-gray-800 text-gray-500 dark:text-gray-300 border-gray-300 dark:border-gray-600 hover:border-brand-400'}`}>
+                  {g.producto}
+                  <span className={`text-[9.5px] font-bold px-1 py-px rounded-full ${on ? 'bg-brand-500/20' : 'bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-300'}`}>{nVid}</span>
+                  {preset?.adId && <CheckCircle2 size={11} className="text-emerald-500" />}
+                </button>
+              );
+            })}
+            <span className="ml-auto text-xs text-gray-400">{totalVideos} video{totalVideos === 1 ? '' : 's'} en cola</span>
+          </div>
+
+          {/* 2) El armador del producto elegido, acá mismo: tarjetas
+                desglosables + galería de estáticos + armado a la derecha. */}
+          {productoActivo && (
+            <PublicarArmador
+              key={productoActivo}
+              embedded
+              producto={productoActivo}
+              tarjetas={tarjetasDe(productoActivo)}
+              addToast={addToast}
+              onPublicadas={alPublicar}
+              onVolver={() => {}}
+            />
+          )}
           <p className="text-xs text-gray-400 dark:text-gray-500 text-right">{totalVideos} video{totalVideos === 1 ? '' : 's'} en cola en total</p>
         </div>
       )}
 
-      {publicando && (
-        <PublicarCampanaModal
-          a={publicando.a}
-          addToast={addToast}
-          onPublished={alPublicar}
-          onClose={() => setPublicando(null)}
-        />
-      )}
     </div>
   );
 }

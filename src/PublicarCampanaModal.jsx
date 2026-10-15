@@ -39,7 +39,7 @@ function guardarPreset(a, preset) {
   try { localStorage.setItem(presetKey(a), JSON.stringify({ ...preset, ts: Date.now() })); } catch {}
 }
 
-async function metaApi(path, { connId, method = 'GET', body } = {}) {
+export async function metaApi(path, { connId, method = 'GET', body } = {}) {
   let u = `/api/meta/${path}`;
   if (connId && connId !== '__cookie__') {
     u += `${u.includes('?') ? '&' : '?'}connection_id=${encodeURIComponent(connId)}`;
@@ -54,18 +54,18 @@ async function metaApi(path, { connId, method = 'GET', body } = {}) {
   return d;
 }
 
-const esperar = (ms) => new Promise(r => setTimeout(r, ms));
+export const esperar = (ms) => new Promise(r => setTimeout(r, ms));
 // Errores de LECTURA de Meta que un buyer no tiene por qué descifrar.
-const amigable = (m) => {
+export const amigable = (m) => {
   const s = String(m || '');
   if (/request limit|#17\)|#80004/i.test(s)) return 'Meta está limitando las consultas — esperá un minuto y reintentá';
   if (/Unsupported get request|does not exist/i.test(s)) return 'Ese elemento ya no existe en Meta (¿lo borraron o archivaron?)';
   return s;
 };
-const sinExtension = (n) => String(n || '').replace(/\.[a-z0-9]{2,5}$/i, '');
+export const sinExtension = (n) => String(n || '').replace(/\.[a-z0-9]{2,5}$/i, '');
 
 // Patrones tipo adsuploader: {filename}, {index}, {index:01}, {date}.
-function aplicarPatron(patron, { filename = '', index = 0, fecha = '' }) {
+export function aplicarPatron(patron, { filename = '', index = 0, fecha = '' }) {
   return String(patron || '')
     .replaceAll('{filename}', filename)
     .replaceAll('{index:01}', String(index + 1).padStart(2, '0'))
@@ -572,7 +572,7 @@ export default function PublicarCampanaModal({ a, onClose, addToast, soloPreset 
           ) : (<>
           <label className="inline-flex items-center gap-1.5 text-[11px] text-gray-500 dark:text-gray-400 cursor-pointer shrink-0">
             <input type="checkbox" checked={enPausa} onChange={e => setEnPausa(e.target.checked)} disabled={!!fase} className="accent-brand-500" />
-            Publicar en pausa
+            Crear pausada <span className="hidden sm:inline">(recomendado: la revisás en Meta antes de prenderla)</span>
           </label>
           <span className="flex-1 min-w-0 text-[11px] text-amber-600 dark:text-amber-400 inline-flex items-center gap-1">
             <AlertTriangle size={12} className="shrink-0" />

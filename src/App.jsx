@@ -26,13 +26,11 @@ import BandejaSection from './Bandeja.jsx';
 import InspiracionSection from './InspiracionSection.jsx';
 import WinnersGlobalSection from './WinnersGlobalSection.jsx';
 import ConsultoriaSection from './Consultoria.jsx';
-import CampanasTracker from './CampanasTracker.jsx';
 import { MetaConnectButton } from './MetaConnect.jsx';
 import MetricasSection from './MetricasSection.jsx';
 import PublicarSection from './PublicarSection.jsx';
 import TesteosSection from './TesteosSection.jsx';
 import ProduccionSection from './ProduccionSection.jsx';
-import CreativaDashboard from './CreativaDashboard.jsx';
 import LandingsSection from './LandingsSection.jsx';
 import { teardownLandings } from './landingsStore.js';
 import { DialogHost, confirmDialog } from './dialogs.jsx';
@@ -41,7 +39,8 @@ import PipelineRunOverlay from './PipelineRunOverlay.jsx';
 import ExecutionsTray from './ExecutionsTray.jsx';
 import SelfHealingBanner from './SelfHealingBanner.jsx';
 import ClaudeProactivoSidebar from './ClaudeProactivoSidebar.jsx';
-import MarketingDashboard from './MarketingDashboard.jsx';
+import HomeOS from './HomeOS.jsx';
+import PlanSection from './PlanSection.jsx';
 import CopyGeneratorSection from './CopyGeneratorSection.jsx';
 import SlashCommand from './SlashCommand.jsx';
 import BulkProgressBarGlobal from './BulkProgressBarGlobal.jsx';
@@ -57,6 +56,7 @@ import SupabaseAuthScreen from './SupabaseAuth.jsx';
 import { useMarketingSync } from './useMarketingSync.js';
 import { useUserPrefs } from './useUserPrefs.js';
 import { supabase, onAuthChange } from './supabase.js';
+import { setMembresia } from './miembroStore.js';
 import { initProduccionSync, teardownProduccionSync } from './produccionStore.js';
 import { ensureAppAdmin } from './produccionTeam.js';
 import { initMoneySync, teardownMoneySync } from './moneyStore.js';
@@ -1484,8 +1484,8 @@ function AppShell({ onExit }) {
       const saved = guardada === 'mk-testeos' ? 'mk-metricas' : guardada;
       // Si tenía una sección de Viora/Senydrop/MetaAds, defaulteamos a la
       // de Marketing. Lista de secciones válidas en las plataformas activas:
-      const validSections = ['mk-home', 'mk-arranque', 'mk-bandeja', 'mk-copy', 'mk-meta', 'mk-metricas', 'mk-testeos',
-        'mk-inspiracion', 'mk-winners', 'mk-produccion', 'mk-publicar', 'mk-landings', 'mk-creativa-dash', 'mk-gastos', 'mk-docs', 'con-acta'];
+      const validSections = ['mk-home', 'mk-arranque', 'mk-bandeja', 'mk-copy', 'mk-metricas', 'mk-testeos',
+        'mk-inspiracion', 'mk-winners', 'mk-produccion', 'mk-publicar', 'mk-landings', 'mk-gastos', 'mk-docs', 'mk-plan', 'con-acta'];
       return validSections.includes(saved) ? saved : 'mk-home';
     } catch { return 'mk-home'; }
   });
@@ -2195,6 +2195,7 @@ function AppShell({ onExit }) {
         // rol se trata como admin — igual que antes — para NO romper a los
         // usuarios que ya usan la app (la base es multi-inquilino).
         let role = 'admin';
+        let membresia = null; // cuenta POR ÁREA: { ownerId, areas }
         try {
           if (supabase) {
             // Con timeout: si la red está lenta, NO bloqueamos el ingreso. Ante
@@ -2205,15 +2206,39 @@ function AppShell({ onExit }) {
             const timeout = new Promise(res => setTimeout(() => res({ data: null }), 4000));
             const { data } = await Promise.race([rolePromise, timeout]);
             if (data?.role === 'creator') role = 'creator';
+            else if (data?.role === 'miembro') {
+              // Miembro = cuenta creada por un dueño con acceso a ciertas áreas.
+              // Cargamos su membresía; la UX es la de admin pero acotada a sus
+              // áreas, y los stores operan sobre los datos del DUEÑO.
+              const { data: cm } = await supabase
+                .from('cuenta_miembros')
+                .select('owner_id, areas')
+                .eq('member_id', supabaseUser.id)
+                .maybeSingle();
+              if (cm?.owner_id) membresia = { ownerId: cm.owner_id, areas: cm.areas || [] };
+              // Sin fila (huérfano): queda como admin de sí mismo.
+            }
           }
         } catch { /* ante la duda, admin (comportamiento previo) */ }
         if (cancelled) return;
+        setMembresia(membresia);
+        if (membresia) {
+          // El primer pull de Marketing pudo correr ANTES de conocer la
+          // membresía (con el uid propio → vacío). Re-armamos realtime con el
+          // uid del dueño y forzamos un pull; el segundo disparo cubre el caso
+          // en que el pull inicial seguía en vuelo (el mutex saltea duplicados).
+          try { window.dispatchEvent(new Event('viora:membresia-changed')); } catch {}
+          try { window.dispatchEvent(new Event('viora:force-sync')); } catch {}
+          setTimeout(() => { try { window.dispatchEvent(new Event('viora:force-sync')); } catch {} }, 3500);
+        }
         // Bootstrap del dueño como admin en la base (idempotente) — en SEGUNDO
         // PLANO. Nunca debe frenar el ingreso: antes iba con `await` y un cuelgue
-        // de red te dejaba afuera de la app.
-        if (role !== 'creator') { ensureAppAdmin().catch(() => {}); }
+        // de red te dejaba afuera de la app. Un miembro NO se promueve.
+        if (role !== 'creator' && !membresia) { ensureAppAdmin().catch(() => {}); }
         setCurrentUser({
           role,
+          // Cuenta por área: la UX es admin, acotada por `areas`.
+          miembro: membresia ? { ownerId: membresia.ownerId, areas: membresia.areas } : null,
           name: supabaseUser.user_metadata?.display_name || supabaseUser.email?.split('@')[0] || 'Usuario',
           email: supabaseUser.email,
           id: role === 'creator' ? supabaseUser.id : 'admin',
@@ -2221,6 +2246,7 @@ function AppShell({ onExit }) {
       })();
     } else if (!supabaseUser && currentUser) {
       // Si la sesión de Supabase expiró/salió, deslogueamos del dashboard.
+      setMembresia(null);
       setCurrentUser(null);
     }
     return () => { cancelled = true; };
@@ -2231,7 +2257,15 @@ function AppShell({ onExit }) {
   // primera vez. Para un creator, trae solo sus tarjetas (RLS).
   useEffect(() => {
     if (currentUser && supabaseUser) {
-      initProduccionSync({ role: currentUser.role, userId: supabaseUser.id, name: currentUser.name });
+      // Cuenta por área con 'produccion': opera el tablero del DUEÑO como un
+      // admin (la RLS de 0042 lo permite); las tarjetas nuevas nacen con el
+      // owner_id del dueño, así todos ven lo mismo.
+      const m = currentUser.miembro;
+      initProduccionSync({
+        role: currentUser.role,
+        userId: m?.areas?.includes('produccion') ? m.ownerId : supabaseUser.id,
+        name: currentUser.name,
+      });
       // Saldo por persona + moneda: se sincroniza por el UUID real del dueño,
       // así aparece en cualquier dispositivo (antes vivía solo en localStorage).
       initMoneySync({ userId: supabaseUser.id });
@@ -2241,6 +2275,26 @@ function AppShell({ onExit }) {
       teardownLandings(); // corta realtime + vacía cache: el próximo user no ve landings ajenas
     }
   }, [currentUser?.role, supabaseUser?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Cuenta por área: vive en marketing y solo en las secciones de SUS áreas.
+  // Si la sección actual no le corresponde (estado viejo de localStorage o
+  // navegación directa), lo llevamos a la primera que sí.
+  useEffect(() => {
+    const m = currentUser?.miembro;
+    if (!m) return;
+    if (currentPlatform !== 'marketing') { setCurrentPlatform('marketing'); return; }
+    const SECCIONES_AREA = {
+      metricas: ['mk-home', 'mk-metricas'],
+      productos: ['mk-home', 'mk-arranque'],
+      produccion: ['mk-home', 'mk-produccion', 'mk-publicar'],
+      landings: ['mk-home', 'mk-landings'],
+    };
+    const permitidas = new Set((m.areas || []).flatMap(a => SECCIONES_AREA[a] || []));
+    if (!permitidas.size) return;
+    if (!permitidas.has(currentSection)) {
+      setCurrentSection([...permitidas].find(s => s !== 'mk-home') || 'mk-home');
+    }
+  }, [currentUser?.miembro, currentPlatform, currentSection]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Si el user clickeó el link de "Olvidaste tu contraseña" desde el email
   // mientras YA estaba logueado, el URL hash tiene type=recovery. Sin esto,
@@ -2363,24 +2417,27 @@ function AppShell({ onExit }) {
           <ChevronRight size={14} className={`transition-transform duration-300 ${sidebarOpen ? 'rotate-180' : 'rotate-0'}`} />
         </button>
 
-        {/* Platform switcher + logo */}
-        <div className="relative p-3 pt-4">
-          <PlatformSwitcher
-            currentPlatform={currentPlatform}
-            onSwitch={(id) => {
-              setCurrentPlatform(id);
-              const p = getPlatform(id);
-              setCurrentSection(p.defaultSection);
-              setMobileMenuOpen(false);
-            }}
-            sidebarOpen={sidebarOpen}
-          />
-        </div>
+        {/* Platform switcher + logo. Una cuenta por área vive SOLO en
+            marketing: sin switcher de plataformas. */}
+        {!currentUser.miembro && (
+          <div className="relative p-3 pt-4">
+            <PlatformSwitcher
+              currentPlatform={currentPlatform}
+              onSwitch={(id) => {
+                setCurrentPlatform(id);
+                const p = getPlatform(id);
+                setCurrentSection(p.defaultSection);
+                setMobileMenuOpen(false);
+              }}
+              sidebarOpen={sidebarOpen}
+            />
+          </div>
+        )}
 
         {/* Divisor sutil */}
         <div aria-hidden="true" className="mx-4 h-px bg-gradient-to-r from-transparent via-white/20 to-transparent" />
 
-        <nav className="relative flex-1 p-3 space-y-1 overflow-y-auto">
+        <nav className="relative flex-1 p-3 space-y-1 overflow-y-auto flex flex-col">
           {currentUser.role === 'admin' && currentPlatform === 'viora' && (
             <>
               <NavSection title="Operación" sectionKey="vi-op" sidebarOpen={sidebarOpen}>
@@ -2420,27 +2477,49 @@ function AppShell({ onExit }) {
                   (aparte por pedido) + Gastos. Bandeja, Inspiración,
                   Competencia y Creativos viven como tabs adentro de cada
                   producto en Arranque. */}
+              {/* Cuenta por área (miembro): solo ve las secciones de SUS áreas. */}
+              {/* Orden del menú a gusto del user (captura 14/10): Publicador
+                  arriba en Operación y Meta Ads como entrada propia. */}
               <NavSection title="Operación" sectionKey="mk-op" sidebarOpen={sidebarOpen}>
                 <NavItem icon={LayoutGridIcon} label="Home" section="mk-home" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
-                <NavItem icon={BarChart3} label="Meta Ads" section="mk-meta" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
-                {/* Métricas y Testeos eran dos entradas que pedían lo mismo a
-                    la misma cuenta. Ahora es una sola sección con pestañas. */}
-                <NavItem icon={Gauge} label="Métricas" section="mk-metricas" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
-                <NavItem icon={Rocket} label="Publicador" section="mk-publicar" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
+                {/* Meta Ads salió del menú: es la pestaña "Cuentas de Meta" adentro de Métricas. */}
+                {(!currentUser.miembro || currentUser.miembro.areas.includes('metricas')) && (
+                  <NavItem icon={Gauge} label="Métricas" section="mk-metricas" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
+                )}
+                {(!currentUser.miembro || currentUser.miembro.areas.includes('produccion')) && (
+                  <NavItem icon={Rocket} label="Publicador" section="mk-publicar" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
+                )}
               </NavSection>
-              <NavSection title="Creación de estáticos" sectionKey="mk-estaticos" sidebarOpen={sidebarOpen}>
-                <NavItem icon={Play} label="Productos" section="mk-arranque" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
-                {/* "Winners" (galería vieja de estáticos) y "Copy AI" salieron del
-                    menú (14/10, no se usaban — los winners REALES viven en
-                    Métricas y Producción). Las secciones siguen existiendo por
-                    URL/estado viejo; si el tracking de uso confirma cero visitas,
-                    se borra el código entero. */}
-              </NavSection>
-              <NavSection title="Área creativa" sectionKey="mk-creativa" sidebarOpen={sidebarOpen}>
-                <NavItem icon={Wallet} label="Resumen" section="mk-creativa-dash" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
-                <NavItem icon={Film} label="Producción" section="mk-produccion" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
-                <NavItem icon={ClipboardList} label="Landings" section="mk-landings" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
-              </NavSection>
+              {(!currentUser.miembro || currentUser.miembro.areas.includes('productos')) && (
+                <NavSection title="Creación de estáticos" sectionKey="mk-estaticos" sidebarOpen={sidebarOpen}>
+                  <NavItem icon={Play} label="Productos" section="mk-arranque" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
+                  {/* "Winners" (galería vieja de estáticos) y "Copy AI" salieron del
+                      menú (14/10, no se usaban — los winners REALES viven en
+                      Métricas y Producción). Las secciones siguen existiendo por
+                      URL/estado viejo; si el tracking de uso confirma cero visitas,
+                      se borra el código entero. */}
+                </NavSection>
+              )}
+              {(!currentUser.miembro || currentUser.miembro.areas.some(a => a === 'produccion' || a === 'landings')) && (
+                <NavSection title="Área creativa" sectionKey="mk-creativa" sidebarOpen={sidebarOpen}>
+                  {/* El Resumen (CreativaDashboard) vive embebido en el Home. */}
+                  {(!currentUser.miembro || currentUser.miembro.areas.includes('produccion')) && (
+                    <NavItem icon={Film} label="Producción" section="mk-produccion" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
+                  )}
+                  {(!currentUser.miembro || currentUser.miembro.areas.includes('landings')) && (
+                    <NavItem icon={ClipboardList} label="Landings" section="mk-landings" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
+                  )}
+                </NavSection>
+              )}
+              {/* Plan y facturación: solo el dueño (no miembros), clavado ABAJO
+                  de todo el menú (!mt-auto gana al space-y del nav). */}
+              {!currentUser.miembro && (
+                <div className="!mt-auto pt-4">
+                  <NavSection title="Cuenta" sectionKey="mk-cuenta" sidebarOpen={sidebarOpen} defaultOpen={false}>
+                    <NavItem icon={CreditCard} label="Plan y facturación" section="mk-plan" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
+                  </NavSection>
+                </div>
+              )}
               {/* "Finanzas → Gastos del stack" salió del menú (pedido del user):
                   la sección sigue viva y se llega desde las stats de saldo del
                   pie del sidebar (SidebarStats → onNavGastos). */}
@@ -2537,19 +2616,18 @@ function AppShell({ onExit }) {
           {/* Gate doble de Supabase removido — ahora la auth Supabase es la
               ÚNICA puerta global (ver checkpoint arriba). Si llegamos acá,
               ya hay supabaseUser. */}
-          {currentUser.role === 'admin' && currentPlatform === 'marketing' && (supabaseUser || !supabase) && currentSection === 'mk-home' && <MarketingDashboard onNavigate={(s) => setCurrentSection(s)} />}
+          {currentUser.role === 'admin' && currentPlatform === 'marketing' && (supabaseUser || !supabase) && currentSection === 'mk-home' && <HomeOS onNavigate={(s) => setCurrentSection(s)} addToast={addToast} />}
           {currentUser.role === 'admin' && currentPlatform === 'marketing' && (supabaseUser || !supabase) && currentSection === 'mk-copy' && <CopyGeneratorSection addToast={addToast} />}
           {currentUser.role === 'admin' && currentPlatform === 'marketing' && (supabaseUser || !supabase) && currentSection === 'mk-arranque' && <ArranqueSection addToast={addToast} onGoToSection={setCurrentSection} />}
           {currentUser.role === 'admin' && currentPlatform === 'marketing' && (supabaseUser || !supabase) && currentSection === 'mk-bandeja' && <BandejaSection addToast={addToast} />}
           {/* mk-competencia (sidebar legacy) está redirigido por el effect
               de arriba a mk-arranque — no necesita su propio render. */}
           {currentUser.role === 'admin' && currentPlatform === 'marketing' && (supabaseUser || !supabase) && currentSection === 'mk-inspiracion' && <InspiracionSection addToast={addToast} />}
-          {currentUser.role === 'admin' && currentPlatform === 'marketing' && (supabaseUser || !supabase) && currentSection === 'mk-meta' && <CampanasTracker addToast={addToast} />}
           {currentUser.role === 'admin' && currentPlatform === 'marketing' && (supabaseUser || !supabase) && currentSection === 'mk-metricas' && <MetricasSection addToast={addToast} />}
           {currentUser.role === 'admin' && currentPlatform === 'marketing' && (supabaseUser || !supabase) && currentSection === 'mk-publicar' && <PublicarSection addToast={addToast} />}
           {currentUser.role === 'admin' && currentPlatform === 'marketing' && (supabaseUser || !supabase) && currentSection === 'mk-testeos' && <TesteosSection addToast={addToast} />}
           {currentUser.role === 'admin' && currentPlatform === 'marketing' && (supabaseUser || !supabase) && currentSection === 'mk-winners' && <WinnersGlobalSection addToast={addToast} onGoToSection={setCurrentSection} />}
-          {currentUser.role === 'admin' && currentPlatform === 'marketing' && (supabaseUser || !supabase) && currentSection === 'mk-creativa-dash' && <CreativaDashboard addToast={addToast} />}
+          {currentUser.role === 'admin' && currentPlatform === 'marketing' && (supabaseUser || !supabase) && currentSection === 'mk-plan' && <PlanSection addToast={addToast} />}
           {currentUser.role === 'admin' && currentPlatform === 'marketing' && (supabaseUser || !supabase) && currentSection === 'mk-produccion' && <ProduccionSection addToast={addToast} />}
           {currentUser.role === 'admin' && currentPlatform === 'marketing' && (supabaseUser || !supabase) && currentSection === 'mk-landings' && <LandingsSection addToast={addToast} />}
           {currentUser.role === 'admin' && esAdminPlataforma() && currentPlatform === 'marketing' && (supabaseUser || !supabase) && currentSection === 'mk-gastos' && <GastosStackSection addToast={addToast} />}
@@ -2625,7 +2703,6 @@ const PRODUCT_TABS = {
     { id: 'inspiracion', label: 'Inspiración', emoji: '✨' },
     { id: 'creativos',   label: 'Creativos',   emoji: '🎨' },
     { id: 'galeria',     label: 'Galería',     emoji: '🖼️' },
-    { id: 'copiloto',    label: 'Santi',       emoji: '🧠' },
   ],
 };
 
@@ -2770,13 +2847,14 @@ function NavSection({ title, sectionKey, sidebarOpen, defaultOpen = true, childr
   }
   return (
     <div className="mt-3 first:mt-0">
-      {/* Título de categoría: presencia sin desbordar — 11px extrabold, tracking
-          moderado y en UNA línea (truncate) para títulos largos. */}
+      {/* Título de categoría tipo TÍTULO (pedido del user 14/10): el mismo
+          texto pero grande y protagonista, no la etiquetita uppercase. */}
       <button
         onClick={toggle}
-        className="flex items-center gap-1.5 px-4 mb-1 text-[11px] font-extrabold uppercase tracking-[0.07em] text-white/60 hover:text-white/90 transition w-full"
+        style={{ fontFamily: "'Sora', Inter, system-ui, sans-serif" }}
+        className="flex items-center gap-1.5 px-4 mb-1 text-[14.5px] font-extrabold tracking-tight text-white/90 hover:text-white transition w-full"
       >
-        <ChevronDown size={11} className={`shrink-0 transition-transform duration-200 ${open ? '' : '-rotate-90'}`} />
+        <ChevronDown size={13} className={`shrink-0 transition-transform duration-200 ${open ? '' : '-rotate-90'}`} />
         <span className="truncate text-left" title={title}>{title}</span>
       </button>
       {/* Ítems con leve sangría y ritmo parejo (misma altura para todos) */}
@@ -2795,8 +2873,8 @@ function NavItem({ icon: Icon, label, section, currentSection, onSelect, sidebar
       title={!sidebarOpen ? label : undefined}
       className={`group relative w-full flex items-center gap-2.5 px-3 py-2 rounded-lg transition-colors duration-200 ${
         isActive
-          ? 'bg-gradient-to-r from-pink-600/75 to-rose-500/55 text-white'
-          : 'text-pink-100/75 hover:text-white hover:bg-white/5'
+          ? 'bg-gradient-to-r from-violet-600/85 to-sky-500/55 text-white shadow-[0_4px_14px_rgba(124,58,237,.35)]'
+          : 'text-slate-200/75 hover:text-white hover:bg-white/5'
       }`}
     >
       {/* Indicador lateral sutil sobre el activo (misma geometría que el resto:
@@ -2808,7 +2886,7 @@ function NavItem({ icon: Icon, label, section, currentSection, onSelect, sidebar
         }`}
       />
       <Icon size={17} className="shrink-0" />
-      {sidebarOpen && <span className={`text-[13px] whitespace-nowrap ${isActive ? 'font-semibold' : 'font-medium'}`}>{label}</span>}
+      {sidebarOpen && <span style={{ fontFamily: "'Sora', Inter, system-ui, sans-serif" }} className={`text-[13.5px] whitespace-nowrap ${isActive ? 'font-bold' : 'font-semibold'}`}>{label}</span>}
       {/* Tooltip en modo colapsado */}
       {!sidebarOpen && (
         <span className="pointer-events-none absolute left-full ml-3 px-2 py-1 rounded-md text-xs font-semibold whitespace-nowrap bg-gray-900 text-white opacity-0 group-hover:opacity-100 translate-x-[-6px] group-hover:translate-x-0 transition-all duration-150 z-50 shadow-lg">
@@ -8426,14 +8504,12 @@ function getSectionTitle(user, section) {
     'mk-copy': 'Marketing · Generador de copy',
     'mk-bandeja': 'Marketing · Bandeja de ideas',
     'mk-docs': 'Marketing · Documentación de producto',
-    'mk-meta': 'Marketing · Meta Ads',
     'mk-metricas': 'Marketing · Métricas',
     'mk-testeos': 'Marketing · Testeos',
     'mk-inspiracion': 'Marketing · Inspiración',
     'mk-winners': 'Marketing · Winners',
     'mk-produccion': 'Marketing · Producción',
     'mk-landings': 'Marketing · Landings',
-    'mk-creativa-dash': 'Marketing · Área creativa',
     'mk-gastos': 'Marketing · Gastos del stack',
     'con-acta': 'Consultoría · Acta de reunión',
   };

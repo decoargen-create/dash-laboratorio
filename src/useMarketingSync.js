@@ -20,6 +20,7 @@ import {
   migrateLocalToCloud,
 } from './marketingSync.js';
 import { supabase, onAuthChange, getCurrentUser } from './supabase.js';
+import { ownerEfectivo } from './miembroStore.js';
 import { migrateIDBCreativosToCloud } from './galeriaMigration.js';
 import { fetchIdeas } from './cloudData.js';
 import { setSyncStatus } from './syncStatusStore.js';
@@ -165,9 +166,20 @@ export function useMarketingSync({ addToast } = {}) {
   //
   // Filtramos por user_id en cada channel para no recibir cambios de
   // otros users (RLS también protege, esto es para minimizar ancho de banda).
+  // Cuentas por área: cuando App termina de cargar la membresía (después del
+  // primer pull, que pudo correr con el uid propio y traer vacío), re-armamos
+  // el canal realtime con el uid del DUEÑO y forzamos un pull.
+  const [memTick, setMemTick] = useState(0);
+  useEffect(() => {
+    const h = () => setMemTick(t => t + 1);
+    window.addEventListener('viora:membresia-changed', h);
+    return () => window.removeEventListener('viora:membresia-changed', h);
+  }, []);
+
   useEffect(() => {
     if (!supabase || !user) return;
-    const uid = user.id;
+    // Para un miembro, los datos (y sus eventos realtime) son del DUEÑO.
+    const uid = ownerEfectivo(user.id);
     // Debounce de los pulls — múltiples cambios seguidos (típico de un
     // batch de scrapes) deberían disparar UN pull, no N.
     let pullTimer = null;
@@ -272,7 +284,7 @@ export function useMarketingSync({ addToast } = {}) {
       try { supabase.removeChannel(channel); } catch {}
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user]);
+  }, [user, memTick]);
 
   // 2. Listen a cambios de localStorage (mismo tab) — usamos un MutationObserver
   // alternativo via `viora:storage-changed` event que disparamos manualmente

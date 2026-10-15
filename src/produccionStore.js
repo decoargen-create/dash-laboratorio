@@ -876,18 +876,24 @@ const mismoProducto = (a, productoId, productoNombre) => {
     : (a.productoNombre || '').trim().toLowerCase() === (productoNombre || '').trim().toLowerCase();
 };
 
-// Winners de un producto: unión (dedup) de los winners de todas sus tarjetas,
-// más recientes primero.
+// Winners de un producto: unión de los winners de todas sus tarjetas, más
+// recientes primero. Pedido del user (14/10): solo los que tienen link de
+// Drive (sin link no sirven como referencia para el editor), y si el mismo
+// video quedó marcado varias veces (semanas distintas, con y sin driveId),
+// queda UNO solo — el actualizado más reciente.
 export function winnersDeProducto(productoId, productoNombre) {
-  const seen = new Set(); const out = [];
+  const porClave = new Map();
   for (const a of read()) {
     if (!mismoProducto(a, productoId, productoNombre)) continue;
     for (const w of (a.winners || [])) {
-      const k = winnerKey(w);
-      if (k && !seen.has(k)) { seen.add(k); out.push(w); }
+      if (!w?.link) continue; // sin Drive, afuera
+      const k = String(w.name || '').trim().toLowerCase() || winnerKey(w);
+      if (!k) continue;
+      const prev = porClave.get(k);
+      if (!prev || (w.ts || 0) > (prev.ts || 0)) porClave.set(k, w);
     }
   }
-  return out.sort((x, y) => (y.ts || 0) - (x.ts || 0));
+  return [...porClave.values()].sort((x, y) => (y.ts || 0) - (x.ts || 0));
 }
 
 // Escribe la lista de winners en TODAS las tarjetas del producto (así queda igual
@@ -1427,6 +1433,35 @@ export function clearCorregidoVideo(id, ts) {
   const visto = (arr[i].archivos || []).find(f => f.ts === ts);
   if (visto) noteArchivoOps(id, { up: [visto] });
   pushRow(id, null, { patch: { archivos: 1 } });
+}
+
+// Publicación POR VIDEO (pedido del user): al salir como anuncio en Meta,
+// cada video queda marcado con publicadoAd (fecha ISO). El Publicador los
+// oculta por defecto; la tarjeta recién pasa a Publicado cuando no le queda
+// ningún video publicable sin marcar.
+export function marcarVideosPublicados(id, tsList) {
+  const arr = read().slice();
+  const i = arr.findIndex(a => a.id === id);
+  if (i === -1) return { completo: false, marcados: 0, estado: null };
+  const setTs = new Set((tsList || []).map(String));
+  const nuevos = [];
+  const archivos = (arr[i].archivos || []).map(f => {
+    if (!setTs.has(String(f.ts)) || f.publicadoAd) return f;
+    const nuevo = { ...f, publicadoAd: new Date().toISOString() };
+    nuevos.push(nuevo);
+    return nuevo;
+  });
+  if (nuevos.length === 0) {
+    const pub = (arr[i].archivos || []).filter(f => f.driveId || f.storagePath);
+    return { completo: pub.length > 0 && pub.every(f => f.publicadoAd), marcados: 0, estado: arr[i].estado };
+  }
+  arr[i] = { ...arr[i], archivos, updatedAt: new Date().toISOString() };
+  write(arr);
+  noteArchivoOps(id, { up: nuevos });
+  pushRow(id, null, { patch: { archivos: 1 } });
+  const publicables = archivos.filter(f => f.driveId || f.storagePath);
+  const completo = publicables.length > 0 && publicables.every(f => f.publicadoAd);
+  return { completo, marcados: nuevos.length, estado: arr[i].estado };
 }
 
 export function removeArchivo(id, ts) {

@@ -594,10 +594,9 @@ function RunHistoryCard({ history, onClear }) {
 // abierto/cerrado se persiste.
 const FLOW_STEPS = [
   { emoji: '⚙️', tab: 'setup', titulo: 'Setup', desc: 'Cargá el producto (foto, oferta) y sus competidores.' },
-  { emoji: '▶️', tab: null, titulo: 'Correr pipeline', desc: 'Leemos los ads ganadores de la competencia y armamos ideas.' },
+  { emoji: '▶️', tab: null, titulo: 'Analizar y generar ideas', desc: 'Miramos los anuncios ganadores de tu competencia y te armamos ideas.' },
   { emoji: '📥', tab: 'bandeja', titulo: 'Bandeja', desc: 'Revisás cada idea y generás el creativo ahí mismo.' },
   { emoji: '🎨', tab: 'creativos', titulo: 'Creativos', desc: 'Ves los estáticos generados, listos para descargar.' },
-  { emoji: '🧠', tab: 'copiloto', titulo: 'Santi', desc: 'Hablale a Santi — el cerebro de la plataforma. Pedíle variantes, ajustes o feedback en lenguaje natural.' },
 ];
 
 function FlowGuide() {
@@ -681,11 +680,9 @@ function ProductTabs({ activeTab, onChange }) {
       tabs: [
         { id: 'bandeja', label: 'Bandeja', emoji: '📥' },
         { id: 'inspiracion', label: 'Inspiración', emoji: '✨' },
-        { id: 'referencias', label: 'Referencias', emoji: '🎞️' },
         { id: 'creativos', label: 'Creativos', emoji: '🎨' },
         { id: 'guiones', label: 'Guiones IA', emoji: '🎬' },
         { id: 'galeria', label: 'Galería', emoji: '🖼️' },
-        { id: 'copiloto', label: 'Santi', emoji: '🧠' },
       ],
     },
   ];
@@ -1411,6 +1408,26 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
     try { localStorage.setItem('adslab-productos-vista', vista); } catch {}
   }, [vista]);
   const [prodDraft, setProdDraft] = useState({ nombre: '', landingUrl: '', descripcion: '' });
+  // Wizard de ALTA de producto (AdsLab OS, etapa 1): el producto nace
+  // enchufado — cuenta publicitaria, campaña base de referencia, break-even
+  // y primeros competidores, todo en el alta en vez de configurarse después.
+  const [wizPaso, setWizPaso] = useState(1);
+  const [wizCx, setWizCx] = useState({ accountId: '', accountName: '', currency: '', connId: null, campanaBaseId: '', campanaBaseName: '', breakEven: '1.60', comp1: '', comp2: '' });
+  const [wizCampanas, setWizCampanas] = useState([]);
+  const [wizCampLoading, setWizCampLoading] = useState(false);
+  const resetWizard = () => { setWizPaso(1); setWizCx({ accountId: '', accountName: '', currency: '', connId: null, campanaBaseId: '', campanaBaseName: '', breakEven: '1.60', comp1: '', comp2: '' }); setWizCampanas([]); };
+  const cargarCampanasWizard = async (accId, connId) => {
+    setWizCampanas([]);
+    if (!accId) return;
+    setWizCampLoading(true);
+    try {
+      const qs = new URLSearchParams({ account_id: accId });
+      if (connId && connId !== '__cookie__') qs.set('connection_id', connId);
+      const r = await fetch(`/api/meta/campaigns?${qs}`, { headers: await metaAuthHeaders(false) });
+      const d = await r.json().catch(() => ({}));
+      if (r.ok) setWizCampanas((d.campaigns || []).slice(0, 60));
+    } catch {} finally { setWizCampLoading(false); }
+  };
 
   // Wizard competitors
   const [showCompForm, setShowCompForm] = useState(false);
@@ -1775,19 +1792,44 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
 
     // Suffix random — antes era solo Date.now() que colisiona en double-click.
     const nuevoId = `prod-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+    // Competidores iniciales del wizard: nombre inferido del dominio.
+    const comps = [wizCx.comp1, wizCx.comp2].map(s => s.trim()).filter(Boolean).map((url, i) => {
+      let nom = url;
+      try { nom = new URL(url.startsWith('http') ? url : `https://${url}`).hostname.replace(/^www\./, '').split('.')[0]; } catch {}
+      return {
+        id: Date.now() + i + Math.random(),
+        nombre: nom.charAt(0).toUpperCase() + nom.slice(1),
+        url, pageId: '', ads: [], lastCheck: null, addedAt: new Date().toISOString(),
+      };
+    });
     const nuevo = {
       id: nuevoId,
       nombre,
       landingUrl,
       descripcion: prodDraft.descripcion.trim(),
-      competidores: [],
+      competidores: comps,
       createdAt: new Date().toISOString(),
     };
+    // Conexiones del wizard: el producto nace con su cuenta, su campaña base
+    // de referencia y su break-even — las secciones dejan de preguntar.
+    if (wizCx.accountId) {
+      nuevo.metaAccount = { id: wizCx.accountId, name: wizCx.accountName, currency: wizCx.currency, connId: wizCx.connId || null, ads: [], fetchedAt: null };
+    }
+    if (wizCx.campanaBaseId) nuevo.campanaBase = { id: wizCx.campanaBaseId, name: wizCx.campanaBaseName };
+    const be = Number(String(wizCx.breakEven).replace(',', '.'));
+    if (Number.isFinite(be) && be > 0) nuevo.breakEven = be;
+
     setProductos(prev => [nuevo, ...prev]);
     setProdDraft({ nombre: '', landingUrl: '', descripcion: '' });
+    resetWizard();
     setShowProdForm(false);
     setActiveProductoId(String(nuevoId));
-    addToast?.({ type: 'success', message: `Producto "${nombre}" creado — cargá competidores y corré el pipeline` });
+    addToast?.({
+      type: 'success',
+      message: wizCx.accountId
+        ? `"${nombre}" creado y conectado a ${wizCx.accountName}${comps.length ? ` · ${comps.length} competidor${comps.length === 1 ? '' : 'es'} para la próxima corrida` : ''}`
+        : `Producto "${nombre}" creado — cargá competidores y corré el pipeline`,
+    });
   };
 
   const handleAddCompetidor = async () => {
@@ -3179,27 +3221,138 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
           </div>
         </div>
 
-        {/* Form de nuevo producto */}
+        {/* Alta de producto: WIZARD de 3 pasos (AdsLab OS, etapa 1). El
+            producto nace enchufado: cuenta publicitaria, campaña base de
+            referencia, break-even y competidores — todo acá, una sola vez. */}
         {showProdForm && (
-          <div className="bg-white dark:bg-gray-800 border-2 border-brand-300 dark:border-brand-700 rounded-xl p-5 space-y-3 animate-fade-in">
-            <h3 className="text-sm font-bold text-gray-900 dark:text-gray-100">Nuevo producto</h3>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <input type="text" value={prodDraft.nombre} onChange={e => setProdDraft({ ...prodDraft, nombre: e.target.value })}
-                placeholder="Nombre del producto"
-                className="px-2.5 py-1.5 text-sm bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-brand-500" />
-              <input type="url" value={prodDraft.landingUrl} onChange={e => setProdDraft({ ...prodDraft, landingUrl: e.target.value })}
-                placeholder="URL de la landing"
-                className="px-2.5 py-1.5 text-sm bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-brand-500" />
+          <div className="bg-white dark:bg-gray-800 border-2 border-brand-300 dark:border-brand-700 rounded-xl p-5 space-y-4 animate-fade-in">
+            <div className="flex items-center gap-3 flex-wrap">
+              <h3 className="text-sm font-bold text-gray-900 dark:text-gray-100">Nuevo producto</h3>
+              <div className="flex gap-1.5 ml-auto">
+                {[[1, 'El producto'], [2, 'Conexiones'], [3, 'Competencia']].map(([n, lbl]) => (
+                  <span key={n} className={`inline-flex items-center gap-1.5 text-[10.5px] font-bold px-2.5 py-1 rounded-full border ${
+                    wizPaso === n ? 'border-brand-500 bg-brand-50 dark:bg-brand-900/30 text-brand-700 dark:text-brand-300'
+                      : wizPaso > n ? 'border-emerald-300 dark:border-emerald-800 text-emerald-600 dark:text-emerald-400'
+                      : 'border-gray-200 dark:border-gray-700 text-gray-400'}`}>
+                    <span>{wizPaso > n ? '✓' : n}</span>{lbl}
+                  </span>
+                ))}
+              </div>
             </div>
+
+            {wizPaso === 1 && (
+              <div className="space-y-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <input type="text" value={prodDraft.nombre} onChange={e => setProdDraft({ ...prodDraft, nombre: e.target.value })}
+                    placeholder="Nombre del producto"
+                    className="px-2.5 py-1.5 text-sm bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-brand-500" />
+                  <input type="url" value={prodDraft.landingUrl} onChange={e => setProdDraft({ ...prodDraft, landingUrl: e.target.value })}
+                    placeholder="URL de la landing"
+                    className="px-2.5 py-1.5 text-sm bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-brand-500" />
+                </div>
+                <p className="text-[11px] text-gray-400">De la landing salen la foto, los beneficios y la oferta real para los creativos.</p>
+              </div>
+            )}
+
+            {wizPaso === 2 && (
+              <div className="space-y-3">
+                <div>
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400 block mb-1">Cuenta publicitaria · opcional</span>
+                  {!metaConnected ? (
+                    <p className="text-xs text-gray-500 dark:text-gray-400">Sin conexión con Meta todavía — podés saltear esto y conectarla después desde la tarjeta "Tu cuenta publicitaria".</p>
+                  ) : (
+                    <div className="flex gap-2 flex-wrap items-center">
+                      <select value={wizCx.accountId}
+                        onChange={e => {
+                          const acc = availableAccounts.find(a => a.id === e.target.value) || null;
+                          setWizCx(c => ({ ...c, accountId: acc?.id || '', accountName: acc?.name || '', currency: acc?.currency || '', connId: acc?.connId || null, campanaBaseId: '', campanaBaseName: '' }));
+                          cargarCampanasWizard(acc?.id, acc?.connId);
+                        }}
+                        className="flex-1 min-w-[220px] px-2.5 py-1.5 text-sm bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-brand-500">
+                        <option value="">— Sin cuenta (configurar después) —</option>
+                        {availableAccounts.map(a => <option key={a.id} value={a.id}>{a.name} · {a.id} ({a.currency})</option>)}
+                      </select>
+                      {availableAccounts.length === 0 && (
+                        <button onClick={loadAdAccounts} disabled={loadingAccounts}
+                          className="px-3 py-1.5 text-xs font-bold text-white bg-[#1877F2] rounded-md hover:bg-[#0f6ae0] transition disabled:opacity-50">
+                          {loadingAccounts ? 'Cargando…' : 'Cargar mis cuentas'}
+                        </button>
+                      )}
+                    </div>
+                  )}
+                  <p className="text-[11px] text-gray-400 mt-1">Las métricas del producto van a mirar solo esta cuenta.</p>
+                </div>
+                <div>
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400 block mb-1">Campaña base · opcional</span>
+                  <select value={wizCx.campanaBaseId} disabled={!wizCx.accountId || wizCampLoading}
+                    onChange={e => {
+                      const c = wizCampanas.find(x => x.id === e.target.value) || null;
+                      setWizCx(p => ({ ...p, campanaBaseId: c?.id || '', campanaBaseName: c?.name || '' }));
+                    }}
+                    className="w-full px-2.5 py-1.5 text-sm bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-brand-500 disabled:opacity-50">
+                    <option value="">{wizCampLoading ? 'Trayendo campañas…' : !wizCx.accountId ? 'Elegí una cuenta primero' : '— Sin campaña base —'}</option>
+                    {wizCampanas.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                  </select>
+                  <p className="text-[11px] text-gray-400 mt-1">La campaña sobre la que se elabora: referencia para testeos y para el publicador.</p>
+                </div>
+                <div>
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400 block mb-1">Punto de equilibrio (break-even)</span>
+                  <input value={wizCx.breakEven} onChange={e => setWizCx(c => ({ ...c, breakEven: e.target.value }))} inputMode="decimal"
+                    className="w-32 px-2.5 py-1.5 text-sm bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-brand-500" />
+                  <p className="text-[11px] text-gray-400 mt-1">ROAS mínimo para no perder plata — todo veredicto (pausar, ganadora, winner) se juzga contra este número.</p>
+                </div>
+              </div>
+            )}
+
+            {wizPaso === 3 && (
+              <div className="space-y-3">
+                <div>
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400 block mb-1">Competidores a monitorear · opcional</span>
+                  <div className="grid gap-2">
+                    <input type="url" value={wizCx.comp1} onChange={e => setWizCx(c => ({ ...c, comp1: e.target.value }))}
+                      placeholder="https://competidor-1.com/products/..."
+                      className="px-2.5 py-1.5 text-sm bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-brand-500" />
+                    <input type="url" value={wizCx.comp2} onChange={e => setWizCx(c => ({ ...c, comp2: e.target.value }))}
+                      placeholder="https://competidor-2.com/products/..."
+                      className="px-2.5 py-1.5 text-sm bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-brand-500" />
+                  </div>
+                  <p className="text-[11px] text-gray-400 mt-1">La próxima corrida del pipeline scrapea su Ad Library y marca los ganadores.</p>
+                </div>
+                <div className="rounded-lg bg-gray-50 dark:bg-gray-900/50 border border-gray-200 dark:border-gray-700 px-3 py-2 text-[11.5px] text-gray-500 dark:text-gray-400 flex flex-wrap gap-x-4 gap-y-1">
+                  <span><b className="text-gray-700 dark:text-gray-200">{prodDraft.nombre.trim() || '—'}</b></span>
+                  <span>Cuenta: <b className="text-gray-700 dark:text-gray-200">{wizCx.accountName || 'después'}</b></span>
+                  <span>Campaña base: <b className="text-gray-700 dark:text-gray-200">{wizCx.campanaBaseName || '—'}</b></span>
+                  <span>Break-even: <b className="text-gray-700 dark:text-gray-200">ROAS {wizCx.breakEven || '—'}</b></span>
+                </div>
+              </div>
+            )}
+
             <div className="flex gap-2 justify-end">
-              <button onClick={() => { setShowProdForm(false); setProdDraft({ nombre: '', landingUrl: '', descripcion: '' }); }}
+              <button onClick={() => { setShowProdForm(false); setProdDraft({ nombre: '', landingUrl: '', descripcion: '' }); resetWizard(); }}
                 className="px-3 py-1.5 text-xs font-semibold text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md hover:bg-gray-50 transition">
                 Cancelar
               </button>
-              <button onClick={handleAddProducto}
-                className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-bold text-white bg-gradient-to-br from-brand-500 to-brand-700 rounded-md hover:from-brand-600 hover:to-brand-800 transition">
-                <Check size={12} /> Crear
-              </button>
+              {wizPaso > 1 && (
+                <button onClick={() => setWizPaso(p => p - 1)}
+                  className="px-3 py-1.5 text-xs font-semibold text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md hover:bg-gray-50 transition">
+                  ← Atrás
+                </button>
+              )}
+              {wizPaso < 3 ? (
+                <button onClick={() => {
+                  if (wizPaso === 1 && !prodDraft.nombre.trim()) { addToast?.({ type: 'error', message: 'Ponele nombre al producto' }); return; }
+                  if (wizPaso === 1 && metaConnected && availableAccounts.length === 0 && !loadingAccounts) loadAdAccounts();
+                  setWizPaso(p => p + 1);
+                }}
+                  className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-bold text-white bg-gradient-to-br from-brand-500 to-brand-700 rounded-md hover:from-brand-600 hover:to-brand-800 transition">
+                  Siguiente →
+                </button>
+              ) : (
+                <button onClick={handleAddProducto}
+                  className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-bold text-white bg-gradient-to-br from-brand-500 to-brand-700 rounded-md hover:from-brand-600 hover:to-brand-800 transition">
+                  <Check size={12} /> Crear producto
+                </button>
+              )}
             </div>
           </div>
         )}
@@ -3836,10 +3989,6 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
 
       {productoTab === 'guiones' && (
         <TranscripcionVideosSection addToast={addToast} forcedProductoId={String(producto.id)} embedded />
-      )}
-
-      {productoTab === 'referencias' && (
-        <ReferenciasSection producto={producto} addToast={addToast} />
       )}
 
       {productoTab === 'galeria' && (
@@ -4531,7 +4680,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
       {/* Paso 4 — Correr pipeline */}
       <WizardCard
         num="4"
-        title="Correr el pipeline"
+        title="Analizar y generar ideas"
         done={false}
         disabled={!prodReady}
         badge={null}
@@ -4541,15 +4690,22 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
         ) : (
           <>
             <p className="text-xs text-gray-600 dark:text-gray-300 mb-3">
-              Si tu producto aún no tiene research doc, el sistema lo genera primero (~4 min). Después infiere el stage del prospect, scrapea los ads de los competidores que cargaste, detecta ganadores, genera ideas y scorea los hooks. Primera corrida: 8-15 min. Corridas siguientes: 2-5 min. Necesitás al menos 1 competidor cargado.
+              Analizamos tu producto, miramos los anuncios de tus competidores y detectamos cuáles les funcionan.
+              Con eso te armamos ideas de anuncios para revisar en la Bandeja. La primera vez tarda 10-15 min
+              (podés seguir usando la app); después, 2-5 min.
             </p>
+            {competidores.length === 0 && (
+              <p className="mb-3 p-2.5 rounded-lg text-xs bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 text-amber-800 dark:text-amber-200">
+                ⚠ Te falta agregar al menos 1 competidor (paso 3): sin eso no tenemos de dónde sacar ideas.
+              </p>
+            )}
 
             {/* Config del generador — colapsable */}
             <div className="mb-3 p-3 bg-gray-50 dark:bg-gray-900/30 border border-gray-200 dark:border-gray-700 rounded-lg">
               <button onClick={() => setShowGenConfig(v => !v)}
                 className="w-full flex items-center justify-between text-xs font-semibold text-gray-700 dark:text-gray-200">
                 <span className="inline-flex items-center gap-2">
-                  ⚙️ Generador de ideas
+                  ⚙️ Config avanzada del generador
                   <span className="text-[10px] font-mono text-gray-400">
                     {genConfig.limiteDiario} ideas/corrida · {genConfig.formatoStatic}/{genConfig.formatoVideo} static/video
                   </span>
@@ -4646,7 +4802,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
               {!running ? (
                 <button onClick={runPipeline}
                   className="inline-flex items-center gap-1.5 px-4 py-2.5 text-sm font-bold text-white bg-gradient-to-br from-brand-500 to-brand-600 rounded-lg hover:from-brand-700 hover:to-brand-600 shadow-sm transition">
-                  <Play size={14} /> Correr pipeline
+                  <Play size={14} /> Analizar y generar ideas
                 </button>
               ) : (
                 <button onClick={handleCancel}

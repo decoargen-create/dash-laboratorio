@@ -43,6 +43,7 @@ import { alertDialog } from './dialogs.jsx';
 import { supabase } from './supabase.js';
 import MenuFecha from './MenuFecha.jsx';
 import PublicarCampana from './PublicarCampana.jsx';
+import CampanasTracker from './CampanasTracker.jsx';
 import { referenciasApi } from './referenciasApi.js';
 import { fetchMeta, leerCacheMeta, pathTestingInsights, pathAdsWithInsights, recordarConnId } from './metricasCache.js';
 import { VistaEmbudo } from './EmbudoVista.jsx';
@@ -138,7 +139,7 @@ function Why({ k, datos, cfg, currency, onOpen }) {
     <button
       type="button"
       onClick={(e) => { e.stopPropagation(); onOpen({ k, datos, cfg, currency }); }}
-      title="Cómo se calcula"
+      title="¿Qué es esto? Tocá para ver la explicación y la cuenta hecha con tus números"
       className="w-[15px] h-[15px] shrink-0 rounded-full border border-gray-300 dark:border-gray-600 text-[9px] font-bold text-gray-400 hover:text-brand-500 hover:border-brand-500 transition inline-grid place-items-center"
     >i</button>
   );
@@ -176,10 +177,10 @@ function FormulaModal({ open, onClose }) {
 }
 
 // ── piezas chicas ──
-function Kpi({ label, value, sub, tone = '', children }) {
+function Kpi({ label, value, sub, tone = '', children, title }) {
   const tones = { ok: 'text-emerald-600 dark:text-emerald-400', bad: 'text-red-600 dark:text-red-400', warn: 'text-amber-600 dark:text-amber-400' };
   return (
-    <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl px-3.5 py-3">
+    <div title={title} className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl px-3.5 py-3">
       <div className="flex items-center gap-1.5">
         <p className="text-[9.5px] font-bold uppercase tracking-[.09em] text-gray-400 truncate">{label}</p>
         {children}
@@ -190,7 +191,13 @@ function Kpi({ label, value, sub, tone = '', children }) {
   );
 }
 
-function Pill({ tone, children }) {
+// Tooltip estándar de ROAS: la métrica que más decide, explicada para
+// cualquiera (pedido del user: que la plataforma la use cualquier persona).
+const TIP_ROAS = 'ROAS: cuánto vendiste por cada $1 que pusiste en anuncios. 2,00 = por cada $1 volvieron $2. Verde = arriba de tu mínimo; rojo = abajo.';
+const TIP_CPA = 'Cuánto gastaste en anuncios para conseguir cada compra.';
+const TIP_ENTREGA = 'Si Meta lo está mostrando ahora. Puede estar prendido y no mostrarse (en revisión o rechazado).';
+
+function Pill({ tone, children, title }) {
   const t = {
     ok: 'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300',
     bad: 'bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-300',
@@ -199,7 +206,7 @@ function Pill({ tone, children }) {
     // Verde fuerte: oportunidad de escala (subir presupuesto).
     up: 'bg-emerald-500 text-white dark:bg-emerald-500 dark:text-white shadow-sm',
   }[tone] || 'bg-gray-100 dark:bg-gray-700 text-gray-600';
-  return <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold whitespace-nowrap ${t}`}>{children}</span>;
+  return <span title={title} className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold whitespace-nowrap ${t}`}>{children}</span>;
 }
 
 // Columna Presupuesto: muestra el diario y, como en Meta, DOBLE CLICK para
@@ -369,13 +376,13 @@ function VistaManager({ accountId, connId, currency, preset, presupuestos, onPre
               <tr className="bg-gray-50 dark:bg-gray-900/50 text-gray-400 text-[9.5px] uppercase tracking-wider">
                 <th className="px-3 py-2 w-10" />
                 <th className="text-left font-bold px-2 py-2">Nombre</th>
-                <th className="text-left font-bold px-2 py-2">Entrega</th>
-                <th className="text-right font-bold px-2 py-2">Presupuesto</th>
+                <th className="text-left font-bold px-2 py-2" title={TIP_ENTREGA}>Entrega</th>
+                <th className="text-right font-bold px-2 py-2" title="Plata por día. Hacé doble click sobre el número para cambiarlo.">Presupuesto</th>
                 {thSort('compras', 'Compras')}
-                {thSort('cpa', 'Costo por compra')}
+                {thSort('cpa', 'Costo por compra', TIP_CPA)}
                 {thSort('spend', 'Importe gastado')}
                 {thSort('revenue', 'Valor de conversión')}
-                {thSort('roas', 'ROAS (compras)')}
+                {thSort('roas', 'ROAS (compras)', TIP_ROAS)}
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100 dark:divide-gray-700/60">
@@ -527,7 +534,7 @@ function DesgloseCampana({ campaignId, accountId, connId, currency, presupuestos
               <th className="text-right font-bold px-2 py-1">Presupuesto</th>
               <th className="text-right font-bold px-2 py-1">Compras</th>
               <th className="text-right font-bold px-2 py-1">Gastado</th>
-              <th className="text-right font-bold px-2 py-1">ROAS</th>
+              <th className="text-right font-bold px-2 py-1" title={TIP_ROAS}>ROAS</th>
               <th className="text-right font-bold px-2 py-1">Costo carrito</th>
               <th className="text-right font-bold px-2 py-1">Costo pago</th>
             </tr>
@@ -982,7 +989,7 @@ export function VistaHoy({ ads, cfg, cfgRaw, setCfg, productos, productosVisible
         abierto={verCriterios} onToggle={() => setVerCriterios(v => !v)} />
 
       <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-2">
-        <Kpi label="Plata en juego" value={fmtM(r.plataEnJuego, currency)} tone="bad"
+        <Kpi label="Plata que podés frenar hoy" title="Lo que esos anuncios iban a gastar de acá a la noche si no los apagás." value={fmtM(r.plataEnJuego, currency)} tone="bad"
           sub={r.plataRedirigible > 0 && r.ahorroPotencial > 0
             ? `${fmtM(r.ahorroPotencial, currency)} se ahorra · ${fmtM(r.plataRedirigible, currency)} se redirige`
             : r.plataRedirigible > 0
@@ -993,10 +1000,10 @@ export function VistaHoy({ ads, cfg, cfgRaw, setCfg, productos, productosVisible
         </Kpi>
         <Kpi label="Mal invertido hoy" value={fmtP(pctMalo)} tone={tonoMalo}
           sub={r.aPausar.length
-            ? `${fmtM(gastoMalo, currency)} de ${fmtM(r.promedios.spend, currency)} se fue a lo marcado para pausar · sano < 15%`
-            : 'nada para pausar — el gasto está sano'} />
+            ? `${fmtM(gastoMalo, currency)} del gasto de hoy fue a lo marcado para apagar (sano: menos de 15%)`
+            : 'nada para apagar — el gasto está sano'} />
         <Kpi label="Gastado hoy" value={fmtM(r.promedios.spend, currency)}
-          sub={`${ads.length} anuncios con entrega`} />
+          sub={`${ads.length} anuncios con gasto hoy`} />
         <Kpi label="ROAS del día" value={fmtR(r.promedios.roas)}
           tone={r.promedios.roas >= (cfg.roasMaxPausar || 1) ? 'ok' : 'bad'}
           sub={`${fmtM(r.promedios.revenue, currency)} facturado`}>
@@ -1037,8 +1044,8 @@ export function VistaHoy({ ads, cfg, cfgRaw, setCfg, productos, productosVisible
             <thead>
               <tr className="bg-gray-50 dark:bg-gray-900/50 text-gray-400 text-[9.5px] uppercase tracking-wider">
                 <th className="text-left font-bold px-3.5 py-2">{esCampana ? 'Campaña' : 'Anuncio'}</th>
-                <th className="text-left font-bold px-2 py-2">Entrega</th>
-                <th className="text-left font-bold px-2 py-2">Veredicto</th>
+                <th className="text-left font-bold px-2 py-2" title={TIP_ENTREGA}>Entrega</th>
+                <th className="text-left font-bold px-2 py-2" title="Lo que te recomendamos hacer con cada uno.">Veredicto</th>
                 <th className="text-right font-bold px-2 py-2 cursor-pointer select-none hover:text-gray-700 dark:hover:text-gray-200 transition"
                   title="Lo que Meta llama «Importe gastado» — click para ordenar por mayor/menor"
                   onClick={() => clickOrden('spend')}>Importe gastado{flechaOrden('spend')}</th>
@@ -1047,7 +1054,7 @@ export function VistaHoy({ ads, cfg, cfgRaw, setCfg, productos, productosVisible
                   onClick={() => clickOrden('roas')}>ROAS de compras{flechaOrden('roas')}</th>
                 <th className="text-right font-bold px-2 py-2" title="Costo por agregar al carrito">Costo p/ carrito</th>
                 <th className="text-right font-bold px-2 py-2" title="Costo por pago iniciado">Costo p/ pago</th>
-                <th className="text-right font-bold px-2 py-2">Presupuesto</th>
+                <th className="text-right font-bold px-2 py-2" title="Plata por día. Hacé doble click sobre el número para cambiarlo.">Presupuesto</th>
                 <th className="px-2 py-2" />
               </tr>
             </thead>
@@ -1075,6 +1082,13 @@ export function VistaHoy({ ads, cfg, cfgRaw, setCfg, productos, productosVisible
                 const label = p.accion === 'pausar' ? 'Pausar' : p.accion === 'dejar-correr' ? 'Dejalo correr'
                   : opp.es ? '📈 Subir presupuesto'
                   : sinDatos ? 'Sin datos aún' : 'Va bien';
+                // Tooltip del veredicto: qué significa y qué hacer (para que
+                // lo entienda cualquiera, no solo quien armó las reglas).
+                const tipVeredicto = p.accion === 'pausar' ? 'Vende poco y le cuesta caro llegar al carrito. Conviene apagarlo.'
+                  : p.accion === 'dejar-correr' ? 'Hoy vende poco, pero la gente llega al carrito a buen precio. Esperá; la venta puede llegar más tarde.'
+                  : opp.es ? 'Viene vendiendo bien hoy y toda la semana. Probá darle más plata.'
+                  : sinDatos ? 'Gastó muy poco todavía para juzgarlo.'
+                  : 'Rinde por encima de tu mínimo. No hace falta tocar nada.';
                 // Franja + fondo por veredicto: rojo suave = apagar, ámbar =
                 // seguir de cerca, verde = va bien, verde fuerte = escalar.
                 // Formal, tipo planilla: sin fondos tintados por fila — el color
@@ -1113,7 +1127,7 @@ export function VistaHoy({ ads, cfg, cfgRaw, setCfg, productos, productosVisible
                         </div>
                       </td>
                       <td className="px-2 py-2"><Entrega item={a} cambios={cambios} /></td>
-                      <td className="px-2 py-2"><Pill tone={tone}>{label}</Pill></td>
+                      <td className="px-2 py-2"><Pill tone={tone} title={tipVeredicto}>{label}</Pill></td>
                       <td className="px-2 py-2 text-right tabular-nums font-semibold text-gray-900 dark:text-gray-100">
                         {fmtM(i.spend, currency)}
                         {r.promedios.spend > 0 && i.spend > 0 && (
@@ -1207,8 +1221,48 @@ export function VistaHoy({ ads, cfg, cfgRaw, setCfg, productos, productosVisible
 // ========================================================================
 // Pestaña: SEMANAS (cohortes de testeo)
 // ========================================================================
-function VistaSemanas({ campaigns, cfg, productos, productoId, currency, accountId, onWhy, fotos }) {
+function VistaSemanas({ campaigns, cfg, productos, productoId, currency, accountId, connId, preset = 'last_30d', onWhy, fotos }) {
   const [abierto, setAbierto] = useState(null);
+  // Mix VIDEO vs IMAGEN por campaña (lazy, cache-first): qué % de cada semana
+  // fue video y qué % imagen, y cuál rindió mejor. Pedido del user.
+  const [mix, setMix] = useState(null); // null = cargando | {campaignId: {video, imagen}}
+  useEffect(() => {
+    if (!accountId) { setMix({}); return; }
+    let vivo = true;
+    const path = `semanas-mix?account_id=${encodeURIComponent(accountId)}&date_preset=${encodeURIComponent(preset)}`;
+    const cacheado = leerCacheMeta(path);
+    if (cacheado) setMix(cacheado.data.porCampana || {});
+    (async () => {
+      try {
+        const d = await fetchMeta(path, { connId });
+        if (vivo) setMix(d.porCampana || {});
+      } catch { if (vivo && !cacheado) setMix({}); }
+    })();
+    return () => { vivo = false; };
+  }, [accountId, connId, preset]);
+
+  // Agrega el mix de una semana sumando sus campañas.
+  const mixDe = (f) => {
+    if (!mix) return null;
+    const acc = { video: { ads: 0, spend: 0, compras: 0, revenue: 0 }, imagen: { ads: 0, spend: 0, compras: 0, revenue: 0 } };
+    let hubo = false;
+    for (const id of (f.idsTodas || [])) {
+      const m = mix[id];
+      if (!m) continue;
+      hubo = true;
+      for (const t of ['video', 'imagen']) {
+        acc[t].ads += m[t].ads; acc[t].spend += m[t].spend; acc[t].compras += m[t].compras; acc[t].revenue += m[t].revenue;
+      }
+    }
+    if (!hubo) return null;
+    const total = acc.video.spend + acc.imagen.spend;
+    return {
+      ...acc,
+      pctVideo: total > 0 ? (acc.video.spend / total) * 100 : 0,
+      roasV: acc.video.spend > 0 ? acc.video.revenue / acc.video.spend : 0,
+      roasI: acc.imagen.spend > 0 ? acc.imagen.revenue / acc.imagen.spend : 0,
+    };
+  };
   // Etapa: la eficiencia semanal se mide sobre los TESTEOS (renovaciones).
   // Las preescalas (deep pocket, mayor roas, cost cap, bid cap, only pocket)
   // y escalas se pueden mirar aparte con los chips, pero no mezclan.
@@ -1270,14 +1324,15 @@ function VistaSemanas({ campaigns, cfg, productos, productoId, currency, account
         <table className="w-full text-xs">
           <thead>
             <tr className="bg-gray-50 dark:bg-gray-900/50 text-gray-400 text-[9.5px] uppercase tracking-wider">
-              <th className="text-left font-bold px-3.5 py-2">Cohorte</th>
-              <th className="text-left font-bold px-2 py-2">Eficiencia</th>
+              <th className="text-left font-bold px-3.5 py-2" title="Las campañas agrupadas por la semana en que arrancaron.">Semana</th>
+              <th className="text-left font-bold px-2 py-2" title="De las campañas nuevas que ya se pueden juzgar, qué % salió ganadora.">Eficiencia</th>
               <th className="text-right font-bold px-2 py-2">Ganó</th>
               <th className="text-right font-bold px-2 py-2">Perdió</th>
               <th className="text-right font-bold px-2 py-2">Sin datos</th>
               <th className="text-right font-bold px-2 py-2">Gasto</th>
               <th className="text-right font-bold px-2 py-2">Facturado</th>
-              <th className="text-right font-bold px-2 py-2">ROAS</th>
+              <th className="text-right font-bold px-2 py-2" title={TIP_ROAS}>ROAS</th>
+              <th className="text-left font-bold px-2 py-2" title="Qué % del gasto de la semana fue a anuncios de VIDEO y qué % a IMAGEN, y el ROAS de cada tipo. En verde, el que rindió mejor.">🎥 / 🖼</th>
               <th className="px-2 py-2" />
             </tr>
           </thead>
@@ -1296,7 +1351,7 @@ function VistaSemanas({ campaigns, cfg, productos, productoId, currency, account
                 <React.Fragment key={f.semana || 'sin'}>
                   {nuevoMes && (
                     <tr className="bg-gray-50/80 dark:bg-gray-900/60">
-                      <td colSpan={9} className="px-3.5 py-1.5 text-[10px] font-bold uppercase tracking-wider text-gray-500 dark:text-gray-400">
+                      <td colSpan={10} className="px-3.5 py-1.5 text-[10px] font-bold uppercase tracking-wider text-gray-500 dark:text-gray-400">
                         {etiquetaMes(mes)}
                       </td>
                     </tr>
@@ -1335,6 +1390,25 @@ function VistaSemanas({ campaigns, cfg, productos, productoId, currency, account
                     <td className="px-2 py-2 text-right tabular-nums text-gray-600 dark:text-gray-300">{fmtM(f.totales.spend, currency)}</td>
                     <td className="px-2 py-2 text-right tabular-nums text-gray-600 dark:text-gray-300">{fmtM(f.totales.revenue, currency)}</td>
                     <td className={`px-2 py-2 text-right tabular-nums font-bold ${f.totales.roas >= 1.5 ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`}>{fmtR(f.totales.roas)}</td>
+                    <td className="px-2 py-2 whitespace-nowrap">
+                      {(() => {
+                        const m = mixDe(f);
+                        if (!m) return <span className="text-gray-400 text-[10px]">{mix === null ? '…' : '—'}</span>;
+                        const soloUno = m.video.spend <= 0 || m.imagen.spend <= 0;
+                        const ganaVideo = m.roasV >= m.roasI;
+                        return (
+                          <span className="inline-flex flex-col leading-tight text-[10.5px] tabular-nums"
+                            title={`Video: ${m.video.ads} ads · ${fmtM(m.video.spend, currency)} · ${m.video.compras} compras · ROAS ${fmtR(m.roasV)}\nImagen: ${m.imagen.ads} ads · ${fmtM(m.imagen.spend, currency)} · ${m.imagen.compras} compras · ROAS ${fmtR(m.roasI)}`}>
+                            <span className={soloUno || ganaVideo ? (m.video.spend > 0 ? 'text-emerald-600 dark:text-emerald-400 font-semibold' : 'text-gray-400') : 'text-gray-500 dark:text-gray-400'}>
+                              🎥 {Math.round(m.pctVideo)}%{m.video.spend > 0 ? ` · ${fmtR(m.roasV)}` : ''}
+                            </span>
+                            <span className={soloUno || !ganaVideo ? (m.imagen.spend > 0 ? 'text-emerald-600 dark:text-emerald-400 font-semibold' : 'text-gray-400') : 'text-gray-500 dark:text-gray-400'}>
+                              🖼 {Math.round(100 - m.pctVideo)}%{m.imagen.spend > 0 ? ` · ${fmtR(m.roasI)}` : ''}
+                            </span>
+                          </span>
+                        );
+                      })()}
+                    </td>
                     <td className="px-2 py-2 text-right">
                       <MetaLink nivel="campaigns" accountId={accountId}
                         ids={f.idsGanadoras.length ? f.idsGanadoras : f.idsTodas}
@@ -1344,7 +1418,7 @@ function VistaSemanas({ campaigns, cfg, productos, productoId, currency, account
                     </td>
                   </tr>
                   {open && (
-                    <tr><td colSpan={9} className="bg-gray-50/60 dark:bg-gray-900/40 px-3.5 py-3">
+                    <tr><td colSpan={10} className="bg-gray-50/60 dark:bg-gray-900/40 px-3.5 py-3">
                       <div className="pl-5 overflow-x-auto">
                         <table className="w-full text-xs min-w-[780px]">
                           <thead>
@@ -1726,7 +1800,7 @@ function VistaWinners({ account, accountId, cfg, cfgRaw, productos, productoId, 
                 <tr className="bg-gray-50 dark:bg-gray-900/50 text-gray-400 text-[9.5px] uppercase tracking-wider">
                   <th className="text-left font-bold px-3.5 py-2">Creativo</th>
                   <th className="text-left font-bold px-2 py-2">Campaña · producto</th>
-                  <th className="text-right font-bold px-2 py-2">ROAS</th>
+                  <th className="text-right font-bold px-2 py-2" title={TIP_ROAS}>ROAS</th>
                   <th className="text-right font-bold px-2 py-2">Compras</th>
                   <th className="text-right font-bold px-2 py-2">Gasto</th>
                   <th className="text-right font-bold px-2 py-2">Facturado</th>
@@ -1893,12 +1967,64 @@ function VistaWinners({ account, accountId, cfg, cfgRaw, productos, productoId, 
 // ========================================================================
 // Pestaña: PROSPECTADORES
 // ========================================================================
-function VistaProspectadores({ ads, cfg, currency, accountId, onWhy, cambios, trabajando, onEstado, ventanaLabel = 'últimos 7 días' }) {
+function VistaProspectadores({ ads, cfg, currency, accountId, connId, preset = 'last_7d', onWhy, cambios, trabajando, onEstado, ventanaLabel = 'últimos 7 días' }) {
   const [abierto, setAbierto] = useState(null);
-  const lista = useMemo(() => ads
-    .map(a => ({ ...a, ...esProspectador(a.insights, cfg) }))
-    .sort((a, b) => (b.es - a.es) || (b.insights.reach - a.insights.reach)), [ads, cfg]);
-  const si = lista.filter(a => a.es);
+
+  // Gasto promedio por anuncio de la ventana (solo ads con gasto): contra esto
+  // se mide el "gasto representativo" — frecuencia baja con dos mangos no es
+  // prospección, es falta de data.
+  const gastoPromedio = useMemo(() => {
+    const conGasto = ads.filter(a => Number(a.insights?.spend || 0) > 0);
+    if (conGasto.length === 0) return 0;
+    return conGasto.reduce((s, a) => s + Number(a.insights.spend || 0), 0) / conGasto.length;
+  }, [ads]);
+
+  // PRE-candidatos: pasan todos los cortes de la ventana (gasto representativo,
+  // frecuencia, ROAS, compras, alcance). El resto NI SE MUESTRA (pedido del
+  // user): esta pestaña es "quién está prospectando", no la lista completa.
+  const preCandidatos = useMemo(() => ads
+    .map(a => ({ ...a, ...esProspectador(a.insights, cfg, { gastoPromedio }) }))
+    .filter(a => a.es)
+    .sort((a, b) => (b.insights.spend - a.insights.spend)), [ads, cfg, gastoPromedio]);
+  const descartados = ads.length - preCandidatos.length;
+
+  // VERIFICACIÓN INTRADIARIA: la frecuencia de la ventana puede dar baja "de
+  // promedio" aunque algún día se haya ido arriba. Pedimos el desglose diario
+  // de los pre-candidatos y exigimos que el PEOR día siga bajo el límite.
+  const [diario, setDiario] = useState(null); // null = cargando | {adId: {freqMax, dias}}
+  useEffect(() => {
+    const ids = preCandidatos.map(a => a.id).filter(Boolean);
+    if (!accountId || ids.length === 0) { setDiario({}); return; }
+    let vivo = true;
+    setDiario(null);
+    (async () => {
+      try {
+        let u = `/api/meta/prosp-daily?account_id=${encodeURIComponent(accountId)}&ids=${ids.slice(0, 50).join(',')}&date_preset=${encodeURIComponent(preset)}`;
+        if (connId && connId !== '__cookie__') u += `&connection_id=${encodeURIComponent(connId)}`;
+        const r = await fetch(u, { headers: await authHeaders(false) });
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(d.error || `Error ${r.status}`);
+        if (vivo) setDiario(d.porAd || {});
+      } catch {
+        // Si el desglose falla (rate limit), mostramos los pre-candidatos con
+        // la marca "sin verificar" en vez de esconder todo.
+        if (vivo) setDiario({});
+      }
+    })();
+    return () => { vivo = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [accountId, connId, preset, preCandidatos.map(a => a.id).join(',')]);
+
+  const lista = useMemo(() => preCandidatos.map(a => {
+    const d = diario?.[a.id];
+    const freqMax = d?.freqMax || 0;
+    const verificado = diario !== null && d != null && d.dias > 0;
+    // Confirmado: el peor día se mantuvo bajo el límite intradiario.
+    const okDiario = !verificado || freqMax <= (cfg.maxFrecuenciaProsp || 1.10);
+    return { ...a, freqMax, verificado, okDiario };
+  }).filter(a => a.okDiario), [preCandidatos, diario, cfg]);
+  const caidosPorDia = preCandidatos.length - lista.length;
+  const si = lista;
 
   return (
     <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl overflow-hidden">
@@ -1906,15 +2032,17 @@ function VistaProspectadores({ ads, cfg, currency, accountId, onWhy, cambios, tr
         <h3 className="text-[13px] font-bold text-gray-900 dark:text-gray-100">Prospectadores</h3>
         <Why k="prospectador" cfg={cfg} currency={currency} onOpen={onWhy} datos={{}} />
         <span className="text-[10.5px] text-gray-400 flex items-center gap-1">
-          {ventanaLabel} · frecuencia <Why k="frecuencia" cfg={cfg} currency={currency} onOpen={onWhy} datos={lista[0]?.insights || {}} />
+          {ventanaLabel} · solo candidatos reales {diario === null && preCandidatos.length > 0 && (
+            <span className="inline-flex items-center gap-1 text-amber-500"><Loader2 size={10} className="animate-spin" /> verificando frecuencia diaria…</span>
+          )}
         </span>
         {si.length > 0 && (
           <span className="ml-auto"><MetaLink nivel="ads" ids={si.map(a => a.id)} accountId={accountId} solid>Abrir {si.length} en Meta</MetaLink></span>
         )}
       </div>
-      {si.length === 0 && lista.length > 0 && (
-        <div className="mx-3.5 mt-3 p-3 rounded-xl text-xs bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 text-blue-800 dark:text-blue-200">
-          Ningún anuncio califica como prospectador con las reglas actuales. Suele significar que la cuenta está viviendo de audiencias ya trabajadas.
+      {si.length === 0 && (
+        <div className="mx-3.5 my-3 p-3 rounded-xl text-xs bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 text-blue-800 dark:text-blue-200">
+          Ningún anuncio califica como prospectador en esta ventana: nada combina gasto representativo, ventas, ROAS sobre tu mínimo y frecuencia baja sostenida. La cuenta está viviendo de públicos ya trabajados — te conviene probar creativos nuevos.
         </div>
       )}
       <div className="overflow-x-auto">
@@ -1922,12 +2050,12 @@ function VistaProspectadores({ ads, cfg, currency, accountId, onWhy, cambios, tr
           <thead>
             <tr className="bg-gray-50 dark:bg-gray-900/50 text-gray-400 text-[9.5px] uppercase tracking-wider">
               <th className="text-left font-bold px-3.5 py-2">Anuncio</th>
-              <th className="text-left font-bold px-2 py-2">Entrega</th>
-              <th className="text-left font-bold px-2 py-2">Veredicto</th>
-              <th className="text-right font-bold px-2 py-2">Frecuencia</th>
-              <th className="text-right font-bold px-2 py-2">Alcance</th>
+              <th className="text-left font-bold px-2 py-2" title={TIP_ENTREGA}>Entrega</th>
+              <th className="text-right font-bold px-2 py-2" title="Cuántas veces vio el anuncio cada persona en toda la ventana. Cerca de 1 = casi todos son gente nueva.">Frecuencia</th>
+              <th className="text-right font-bold px-2 py-2" title="El PEOR día de la ventana: la frecuencia tiene que mantenerse baja también día a día, no solo de promedio.">Frec. diaria máx</th>
+              <th className="text-right font-bold px-2 py-2" title="Cuántas personas distintas lo vieron.">Alcance</th>
               <th className="text-right font-bold px-2 py-2">Compras</th>
-              <th className="text-right font-bold px-2 py-2" title="Lo que Meta llama «ROAS de compras»">ROAS de compras</th>
+              <th className="text-right font-bold px-2 py-2" title={`${TIP_ROAS} (lo que Meta llama «ROAS de compras»)`}>ROAS de compras</th>
               <th className="text-right font-bold px-2 py-2" title={`Importe gastado en la ventana elegida (${ventanaLabel})`}>Importe gastado</th>
               <th className="px-2 py-2" />
             </tr>
@@ -1955,8 +2083,12 @@ function VistaProspectadores({ ads, cfg, currency, accountId, onWhy, cambios, tr
                       </div>
                     </td>
                     <td className="px-2 py-2"><Entrega item={a} cambios={cambios} /></td>
-                    <td className="px-2 py-2">{a.es ? <Pill tone="ok">Prospectador</Pill> : <Pill tone="mute">No</Pill>}</td>
                     <td className={`px-2 py-2 text-right tabular-nums font-semibold ${i.frequency > 0 && i.frequency <= cfg.maxFrecuenciaProsp ? 'text-emerald-600 dark:text-emerald-400' : 'text-amber-600 dark:text-amber-400'}`}>{fmtR(i.frequency)}</td>
+                    <td className="px-2 py-2 text-right tabular-nums">
+                      {a.verificado
+                        ? <span className="font-semibold text-emerald-600 dark:text-emerald-400">{fmtR(a.freqMax)}</span>
+                        : <span className="text-gray-400" title="No se pudo verificar el desglose diario (Meta no respondió) — el dato de la ventana igual pasa el corte.">—</span>}
+                    </td>
                     <td className="px-2 py-2 text-right tabular-nums text-gray-600 dark:text-gray-300">{fmtN(i.reach)}</td>
                     <td className="px-2 py-2 text-right tabular-nums text-gray-600 dark:text-gray-300">{i.purchases}</td>
                     <td className={`px-2 py-2 text-right tabular-nums font-semibold ${i.roas >= cfg.minRoasProsp ? 'text-emerald-600 dark:text-emerald-400' : 'text-gray-500'}`}>{fmtR(i.roas)}</td>
@@ -1975,6 +2107,12 @@ function VistaProspectadores({ ads, cfg, currency, accountId, onWhy, cambios, tr
                             <span className="text-gray-600 dark:text-gray-300">{c.texto}</span>
                           </div>
                         ))}
+                        {a.verificado && (
+                          <div className="flex items-start gap-2 text-[11.5px]">
+                            <span className="w-[15px] h-[15px] rounded-full grid place-items-center text-[9px] font-bold shrink-0 mt-px bg-emerald-100 dark:bg-emerald-900/40 text-emerald-600 dark:text-emerald-400">✓</span>
+                            <span className="text-gray-600 dark:text-gray-300">frecuencia diaria máxima {fmtR(a.freqMax)} ≤ {cfg.maxFrecuenciaProsp} (se mantuvo baja todos los días)</span>
+                          </div>
+                        )}
                       </div>
                     </td></tr>
                   )}
@@ -1984,6 +2122,12 @@ function VistaProspectadores({ ads, cfg, currency, accountId, onWhy, cambios, tr
           </tbody>
         </table>
       </div>
+      {(descartados > 0 || caidosPorDia > 0) && (
+        <p className="px-3.5 py-2 text-[10.5px] text-gray-400 border-t border-gray-100 dark:border-gray-700/60">
+          {descartados > 0 && `${descartados} anuncio${descartados === 1 ? '' : 's'} de la ventana no califica${descartados === 1 ? '' : 'n'} y no se muestra${descartados === 1 ? '' : 'n'} (poco gasto, pocas ventas, ROAS bajo o frecuencia alta).`}
+          {caidosPorDia > 0 && ` ${caidosPorDia} más quedó${caidosPorDia === 1 ? '' : 'aron'} afuera por frecuencia diaria alta (de promedio daba, pero algún día se fue arriba).`}
+        </p>
+      )}
     </div>
   );
 }
@@ -2150,6 +2294,12 @@ function VistaReglas({ campaigns, cfg, setCfg, productos, currency, onWhy, orige
           <Campo label="Frecuencia máxima (prospectador)"><input className={inputCls} type="number" step="0.05" value={cfg.maxFrecuenciaProsp} onChange={set('maxFrecuenciaProsp')} /></Campo>
           <Campo label="ROAS mínimo (prospectador)"><input className={inputCls} type="number" step="0.1" value={cfg.minRoasProsp} onChange={set('minRoasProsp')} /></Campo>
           <Campo label="Alcance mínimo (prospectador)"><input className={inputCls} type="number" value={cfg.minAlcanceProsp} onChange={set('minAlcanceProsp')} /></Campo>
+          <Campo label="Gasto mínimo (prospectador)" help="El anuncio tiene que gastar al menos este % del gasto promedio por anuncio de la ventana. Frecuencia baja con muy poco gasto no es prospección, es falta de data. 0 = apagado.">
+            <div className="flex items-center gap-1.5">
+              <input className={inputCls} type="number" min="0" max="100" step="5" value={cfg.pctGastoProsp ?? 60} onChange={set('pctGastoProsp')} />
+              <span className="text-[11px] text-gray-400 shrink-0">% del promedio</span>
+            </div>
+          </Campo>
         </div>
       </div>
     </div>
@@ -2542,31 +2692,36 @@ export default function MetricasSection({ addToast }) {
   // nada lo dicen en vez de mostrar un desplegable que no hace nada.
   const ventana = tab === 'hoy'
     ? { fija: true, label: 'Hoy', motivo: '"Hoy" optimiza el día en curso: sus recomendaciones de pausar/subir son de hoy, por eso el calendario no aplica acá.' }
-    : tab === 'publicar'
-      ? { fija: true, label: 'Nueva campaña', motivo: 'Acá se crea una campaña nueva: no hay rango de fechas que elegir.' }
-      : tab === 'prosp'
-        ? { fija: false, valor: presetProsp, set: setPresetProsp, opciones: PRESETS_PROSP }
-        : tab === 'winners'
-          ? { fija: false, valor: presetWinners, set: setPresetWinners, opciones: PRESETS_WINNERS }
-          : tab === 'embudo'
-            ? { fija: false, valor: presetEmbudo, set: setPresetEmbudo, opciones: PRESETS_EMBUDO }
-            : { fija: false, valor: preset, set: setPreset, opciones: PRESETS_COHORTES };
+    : tab === 'prosp'
+      ? { fija: false, valor: presetProsp, set: setPresetProsp, opciones: PRESETS_PROSP }
+      : tab === 'winners'
+        ? { fija: false, valor: presetWinners, set: setPresetWinners, opciones: PRESETS_WINNERS }
+        : tab === 'embudo'
+          ? { fija: false, valor: presetEmbudo, set: setPresetEmbudo, opciones: PRESETS_EMBUDO }
+          : { fija: false, valor: preset, set: setPreset, opciones: PRESETS_COHORTES };
 
   const TABS = [
-    { id: 'hoy', label: 'Hoy — optimizar', icon: Gauge },
-    { id: 'manager', label: 'Campañas y anuncios', icon: Table2 },
-    { id: 'embudo', label: 'Embudo de compra', icon: Filter },
-    { id: 'semanas', label: 'Testeos por semana', icon: FlaskConical },
-    { id: 'prosp', label: 'Prospectadores', icon: Radar },
-    { id: 'winners', label: 'Winners', icon: Trophy },
-    { id: 'publicar', label: 'Publicar campaña', icon: Rocket },
-    { id: 'reglas', label: 'Reglas de la tienda', icon: SlidersHorizontal },
+    { id: 'hoy', label: 'Hoy — optimizar', icon: Gauge, desc: 'Qué anuncios conviene apagar o potenciar hoy.' },
+    { id: 'manager', label: 'Campañas y anuncios', icon: Table2, desc: 'La misma tabla de Meta: prendé, apagá y cambiá presupuestos.' },
+    { id: 'embudo', label: 'Embudo de compra', icon: Filter, desc: 'En qué paso se te va la gente antes de comprar.' },
+    { id: 'semanas', label: 'Testeos por semana', icon: FlaskConical, desc: 'Cuántas de las campañas nuevas de cada semana salieron ganadoras.' },
+    { id: 'prosp', label: 'Prospectadores', icon: Radar, desc: 'Anuncios que le venden a gente que nunca te había visto.' },
+    { id: 'winners', label: 'Winners', icon: Trophy, desc: 'Tus anuncios ganadores, con el video y por qué funcionan.' },
+    // "Publicar campaña" salió de acá (solo en dev): es el PUBLICADOR, entrada
+    // propia del menú (Área creativa), que junta videos de tarjetas y estáticos.
+    { id: 'reglas', label: 'Reglas de la tienda', icon: SlidersHorizontal, desc: 'Tus números de corte: desde cuánto algo es ganador o hay que apagarlo.' },
+    // Meta Ads salió del menú lateral (pedido del user): el tracker de cuentas
+    // y conexiones vive acá como pestaña.
+    { id: 'cuentas', label: 'Cuentas de Meta', icon: Plug, desc: 'Conectá y administrá tus cuentas publicitarias (tokens y conexiones).' },
   ];
 
   return (
     <div className="max-w-6xl mx-auto space-y-4">
       {header}
 
+      {/* La barra de cuenta/calendario no aplica en "Cuentas de Meta": el
+          tracker tiene sus propios selectores. */}
+      {tab !== 'cuentas' && (
       <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-2.5 flex flex-wrap gap-2 items-center">
         <div className="relative flex-1 min-w-[210px]">
           <select value={accountId} onChange={e => setAccountId(e.target.value)}
@@ -2614,19 +2769,21 @@ export default function MetricasSection({ addToast }) {
         <button onClick={correrWinnersAuto} disabled={!accountId || winnersAutoBusy}
           title="Analiza los ads de esta cuenta (ventana de 7 días) y marca ⭐ automáticamente en Producción los videos ganadores — solo productos con data en Meta; el resto sigue manual."
           className="ml-auto inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-bold text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-900/30 border border-amber-200 dark:border-amber-800 rounded-lg hover:bg-amber-100 dark:hover:bg-amber-900/50 transition disabled:opacity-50">
-          {winnersAutoBusy ? <Loader2 size={12} className="animate-spin" /> : <Trophy size={12} />} Winners auto
+          {winnersAutoBusy ? <Loader2 size={12} className="animate-spin" /> : <Trophy size={12} />} Marcar ganadores en Producción
         </button>
-        <button onClick={() => { if (!account) return; load(account, preset); setRecargaEmbudo(n => n + 1); }} disabled={!account || loading}
+        <button onClick={() => { if (!account) return; load(account, preset, presetProsp); setRecargaEmbudo(n => n + 1); }} disabled={!account || loading}
+          title="Volver a pedirle los datos a Meta ahora mismo"
           className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-semibold text-gray-700 dark:text-gray-200 bg-gray-100 dark:bg-gray-700 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600 transition disabled:opacity-50">
           <RefreshCw size={12} className={loading ? 'animate-spin' : ''} /> Refrescar
         </button>
       </div>
+      )}
 
       <div className="flex gap-1 border-b border-gray-200 dark:border-gray-700 overflow-x-auto">
         {TABS.map(t => {
           const Icon = t.icon;
           return (
-            <button key={t.id} onClick={() => setTab(t.id)}
+            <button key={t.id} onClick={() => setTab(t.id)} title={t.desc}
               className={`inline-flex items-center gap-1.5 px-3 py-2 text-xs font-bold whitespace-nowrap border-b-2 transition ${
                 tab === t.id ? 'text-gray-900 dark:text-gray-100 border-brand-500' : 'text-gray-500 border-transparent hover:text-gray-700 dark:hover:text-gray-200'}`}>
               <Icon size={13} /> {t.label}
@@ -2640,19 +2797,24 @@ export default function MetricasSection({ addToast }) {
         )}
       </div>
 
-      {error ? (
+      {tab === 'cuentas' ? (
+        /* Tracker de cuentas (ex "Meta Ads" del menú): anda sin cuenta elegida
+           arriba, así que va antes de los gates de error/carga/data. */
+        <CampanasTracker addToast={addToast} />
+      ) : error ? (
         <div className="p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-xl flex items-start gap-3">
           <AlertCircle size={17} className="text-red-600 dark:text-red-400 shrink-0 mt-0.5" />
           <div className="min-w-0">
             <p className="text-sm font-semibold text-red-900 dark:text-red-200">No pude traer los datos</p>
             <p className="text-xs text-red-700 dark:text-red-300 mt-0.5 break-words">{error}</p>
+            <p className="text-xs text-red-700/80 dark:text-red-300/80 mt-1.5">Tocá <b>Refrescar</b> arriba a la derecha. Si sigue fallando, reconectá tu cuenta de Meta (puede haber vencido el permiso).</p>
           </div>
         </div>
       ) : loading && !data ? (
         <CargandoMetricas />
       ) : !data ? (
         <div className="border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-xl p-10 text-center">
-          <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">Elegí una cuenta para empezar</p>
+          <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">Elegí tu cuenta publicitaria en el menú de arriba ↑</p>
         </div>
       ) : (
         <>
@@ -2663,7 +2825,7 @@ export default function MetricasSection({ addToast }) {
             nivel={nivelHoy} setNivel={setNivelHoy}
             cambios={cambios} trabajando={trabajando}
             onEstado={({ items, status }) => aplicarEstado({ level: nivelHoy === 'campaigns' ? 'campaign' : 'ad', items, status })}
-            onRecalcular={() => account && load(account, preset)}
+            onRecalcular={() => account && load(account, preset, presetProsp)}
             promediosRef={promedios7d} historico={historico7d}
             presupuestos={presupuestos} onPresupuesto={cambiarPresupuestoRow}
             connId={account?.connId}
@@ -2686,9 +2848,10 @@ export default function MetricasSection({ addToast }) {
               <VistaEmbudo totals={campanasEmbudo.totals} campaigns={campanasEmbudo.campaigns} total={campanasEmbudo.total} currency={currency} />
             )
           )}
-          {tab === 'semanas' && <VistaSemanas campaigns={data.campaigns} cfg={cfgRaw} productos={productos} productoId={productoId || null} currency={currency} accountId={accountId} onWhy={setWhy} fotos={fotos} />}
+          {tab === 'semanas' && <VistaSemanas campaigns={data.campaigns} cfg={cfgRaw} productos={productos} productoId={productoId || null} currency={currency} accountId={accountId} connId={account?.connId} preset={preset} onWhy={setWhy} fotos={fotos} />}
           {tab === 'prosp' && <VistaProspectadores
-            ads={ads7d} cfg={cfg} currency={currency} accountId={accountId} onWhy={setWhy}
+            ads={ads7d} cfg={cfg} currency={currency} accountId={accountId} connId={account?.connId}
+            preset={presetProsp} onWhy={setWhy}
             cambios={cambios} trabajando={trabajando}
             ventanaLabel={etiquetaVentana(presetProsp, PRESETS_PROSP)}
             onEstado={({ items, status }) => aplicarEstado({ level: 'ad', items, status })}
@@ -2700,7 +2863,6 @@ export default function MetricasSection({ addToast }) {
           />}
           {tab === 'manager' && <VistaManager accountId={accountId} connId={account?.connId} currency={currency} preset={preset}
             presupuestos={presupuestos} onPresupuesto={cambiarPresupuestoRow} />}
-          {tab === 'publicar' && <PublicarCampana accountId={accountId} connId={account?.connId} currency={currency} addToast={addToast} productosVisibles={productosEnCuenta} />}
           {tab === 'reglas' && <VistaReglas campaigns={data.campaigns} cfg={cfgRaw} setCfg={setCfgRaw} productos={productos} currency={currency} onWhy={setWhy} origen={origenCfg} />}
         </>
       )}

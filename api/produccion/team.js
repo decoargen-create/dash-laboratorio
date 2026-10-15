@@ -58,8 +58,8 @@ export default async function handler(req, res) {
   // solo editores. Así el dueño puede tener role 'user'/null y aún así manejar
   // el equipo, sin tener que marcar nada en la base.
   const role = await getUserRole(userId);
-  if (role === 'creator') {
-    return respondJSON(res, 403, { error: 'Un editor no puede gestionar el equipo.' });
+  if (role === 'creator' || role === 'miembro') {
+    return respondJSON(res, 403, { error: 'Solo el dueño de la cuenta puede gestionar el equipo.' });
   }
 
   const supabase = getServiceClient();
@@ -232,6 +232,136 @@ export default async function handler(req, res) {
 
     const { error } = await supabase.auth.admin.deleteUser(targetId);
     if (error) return respondJSON(res, 500, { error: error.message });
+    return respondJSON(res, 200, { ok: true });
+  }
+
+  // ═══ CUENTAS POR ÁREA (miembros) ═══════════════════════════════════════
+  // El dueño crea cuentas para su equipo que ven SOLO un pedazo del tablero
+  // ("solamente producción", "solamente estáticos"...). profiles.role =
+  // 'miembro' + fila en cuenta_miembros (owner_id = el dueño, areas = qué ve).
+  // Las policies de la migración 0042 le abren las filas del dueño por área.
+  const AREAS_VALIDAS = ['metricas', 'productos', 'produccion', 'landings'];
+  const limpiarAreas = (arr) =>
+    [...new Set((Array.isArray(arr) ? arr : []).map(a => String(a).trim().toLowerCase()).filter(a => AREAS_VALIDAS.includes(a)))];
+
+  // ---- Listar los miembros del caller ----
+  if (action === 'list-members') {
+    const { data, error } = await supabase
+      .from('cuenta_miembros')
+      .select('member_id, display_name, areas, created_at')
+      .eq('owner_id', userId)
+      .order('created_at', { ascending: true });
+    if (error) return respondJSON(res, 500, { error: error.message });
+    // email desde profiles (una sola query)
+    const ids = (data || []).map(m => m.member_id);
+    let emails = {};
+    if (ids.length) {
+      const { data: perf } = await supabase.from('profiles').select('id,email').in('id', ids);
+      emails = Object.fromEntries((perf || []).map(p => [p.id, p.email]));
+    }
+    return respondJSON(res, 200, {
+      ok: true,
+      members: (data || []).map(m => ({ id: m.member_id, email: emails[m.member_id] || '', display_name: m.display_name, areas: m.areas || [], created_at: m.created_at })),
+    });
+  }
+
+  // ---- Crear un miembro ----
+  if (action === 'create-member') {
+    const email = (body.email || '').toString().trim().toLowerCase();
+    const password = (body.password || '').toString();
+    const displayName = (body.displayName || body.name || '').toString().trim();
+    const areas = limpiarAreas(body.areas);
+
+    if (!EMAIL_RE.test(email)) return respondJSON(res, 400, { error: 'Email inválido.' });
+    if (password.length < 6) return respondJSON(res, 400, { error: 'La contraseña tiene que tener al menos 6 caracteres.' });
+    if (!areas.length) return respondJSON(res, 400, { error: 'Elegí al menos un área para la cuenta.' });
+
+    const name = displayName || email.split('@')[0];
+    const { data: created, error: createErr } = await supabase.auth.admin.createUser({
+      email, password, email_confirm: true, user_metadata: { display_name: name },
+    });
+
+    // Mismo criterio que los editores: si el email ya existe pero es una cuenta
+    // huérfana (sin rol) o ya-miembro, la adoptamos; nunca pisamos otros roles.
+    let memberId = created?.user?.id || null;
+    let adopted = false;
+    if (createErr) {
+      if (!/already|registered|exists/i.test(createErr.message || '')) {
+        return respondJSON(res, 400, { error: createErr.message });
+      }
+      const existing = await findAuthUserByEmail(supabase, email);
+      if (!existing) return respondJSON(res, 400, { error: 'Ese email ya existe pero no lo pude ubicar. Usá otro email.' });
+      const existingRole = await getUserRole(existing.id);
+      if (existingRole && existingRole !== 'miembro') {
+        return respondJSON(res, 400, { error: `Ese email ya pertenece a otra cuenta (${existingRole}). Usá otro email.` });
+      }
+      // Si ya es miembro DE OTRO dueño, tampoco lo tocamos.
+      if (existingRole === 'miembro') {
+        const { data: cm } = await supabase.from('cuenta_miembros').select('owner_id').eq('member_id', existing.id).maybeSingle();
+        if (cm && cm.owner_id !== userId) {
+          return respondJSON(res, 400, { error: 'Ese email ya es miembro del equipo de otra cuenta. Usá otro email.' });
+        }
+      }
+      const { error: updErr } = await supabase.auth.admin.updateUserById(existing.id, {
+        password, email_confirm: true, user_metadata: { display_name: name },
+      });
+      if (updErr) return respondJSON(res, 500, { error: `No se pudo actualizar la cuenta existente: ${updErr.message}` });
+      memberId = existing.id;
+      adopted = true;
+    }
+    if (!memberId) return respondJSON(res, 500, { error: 'No se pudo crear la cuenta.' });
+
+    const { error: upErr } = await supabase
+      .from('profiles')
+      .upsert({ id: memberId, email, display_name: name, role: 'miembro' }, { onConflict: 'id' });
+    if (upErr) return respondJSON(res, 500, { error: `Cuenta lista pero falló marcarla como miembro: ${upErr.message}` });
+
+    const { error: cmErr } = await supabase
+      .from('cuenta_miembros')
+      .upsert({ member_id: memberId, owner_id: userId, display_name: name, areas, updated_at: new Date().toISOString() }, { onConflict: 'member_id' });
+    if (cmErr) return respondJSON(res, 500, { error: `Cuenta lista pero falló asignarle las áreas: ${cmErr.message}` });
+
+    return respondJSON(res, 200, { ok: true, adopted, member: { id: memberId, email, display_name: name, areas } });
+  }
+
+  // ---- Cambiar las áreas de un miembro ----
+  if (action === 'set-member-areas') {
+    const targetId = (body.id || '').toString();
+    const areas = limpiarAreas(body.areas);
+    if (!targetId) return respondJSON(res, 400, { error: 'Falta el id del miembro.' });
+    if (!areas.length) return respondJSON(res, 400, { error: 'Elegí al menos un área.' });
+    const { data, error } = await supabase
+      .from('cuenta_miembros')
+      .update({ areas, updated_at: new Date().toISOString() })
+      .eq('member_id', targetId).eq('owner_id', userId)
+      .select('member_id');
+    if (error) return respondJSON(res, 500, { error: error.message });
+    if (!data?.length) return respondJSON(res, 404, { error: 'Ese miembro no es de tu equipo.' });
+    return respondJSON(res, 200, { ok: true, areas });
+  }
+
+  // ---- Resetear contraseña de un miembro ----
+  if (action === 'reset-password-member') {
+    const targetId = (body.id || '').toString();
+    const password = (body.password || '').toString();
+    if (!targetId) return respondJSON(res, 400, { error: 'Falta el id del miembro.' });
+    if (password.length < 6) return respondJSON(res, 400, { error: 'La contraseña tiene que tener al menos 6 caracteres.' });
+    const { data: cm } = await supabase.from('cuenta_miembros').select('member_id').eq('member_id', targetId).eq('owner_id', userId).maybeSingle();
+    if (!cm) return respondJSON(res, 403, { error: 'Ese miembro no es de tu equipo.' });
+    const { error } = await supabase.auth.admin.updateUserById(targetId, { password });
+    if (error) return respondJSON(res, 500, { error: error.message });
+    return respondJSON(res, 200, { ok: true });
+  }
+
+  // ---- Sacar a un miembro (borra la cuenta) ----
+  if (action === 'remove-member') {
+    const targetId = (body.id || '').toString();
+    if (!targetId) return respondJSON(res, 400, { error: 'Falta el id del miembro.' });
+    const { data: cm } = await supabase.from('cuenta_miembros').select('member_id').eq('member_id', targetId).eq('owner_id', userId).maybeSingle();
+    if (!cm) return respondJSON(res, 403, { error: 'Ese miembro no es de tu equipo.' });
+    const { error } = await supabase.auth.admin.deleteUser(targetId);
+    if (error) return respondJSON(res, 500, { error: error.message });
+    // La fila de cuenta_miembros cae sola por el FK on delete cascade.
     return respondJSON(res, 200, { ok: true });
   }
 

@@ -144,7 +144,7 @@ async function firmarUrls(items) {
   const fullPaths = items.filter(it => it.storagePath).map(it => it.storagePath);
   if (fullPaths.length) {
     try {
-      const { data, error } = await supabase.storage.from(BUCKET).createSignedUrls(fullPaths, 3600);
+      const { data, error } = await supabase.storage.from(BUCKET).createSignedUrls(fullPaths, 43200);
       if (!error && Array.isArray(data)) {
         const by = new Map(data.map(s => [s.path, s.signedUrl]));
         for (const it of items) { const u = it.storagePath && by.get(it.storagePath); if (u) it.imageUrl = u; }
@@ -154,7 +154,7 @@ async function firmarUrls(items) {
   const thumbPaths = items.filter(it => it.thumbPath).map(it => it.thumbPath);
   if (thumbPaths.length) {
     try {
-      const { data, error } = await supabase.storage.from(BUCKET).createSignedUrls(thumbPaths, 3600);
+      const { data, error } = await supabase.storage.from(BUCKET).createSignedUrls(thumbPaths, 43200);
       if (!error && Array.isArray(data)) {
         const by = new Map(data.map(s => [s.path, s.signedUrl]));
         for (const it of items) { const u = it.thumbPath && by.get(it.thumbPath); if (u) it.thumbUrl = u; }

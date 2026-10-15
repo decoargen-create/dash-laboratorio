@@ -52,6 +52,11 @@ export function etiquetaDeValor(value, opciones = []) {
 
 export default function MenuFecha({ value, onChange, opciones = [] }) {
   const [open, setOpen] = useState(false);
+  // De qué lado abre el panel: si el botón está cerca del borde derecho de la
+  // pantalla (lo normal, vive al final del toolbar), el panel se ancla a la
+  // DERECHA del botón — antes abría hacia la derecha y generaba scroll
+  // horizontal en toda la página.
+  const [alineaDerecha, setAlineaDerecha] = useState(true);
   const [presetSel, setPresetSel] = useState(value);
   const [selA, setSelA] = useState(null);
   const [selB, setSelB] = useState(null);
@@ -74,6 +79,12 @@ export default function MenuFecha({ value, onChange, opciones = [] }) {
       setCalBase(new Date(base.getFullYear(), base.getMonth(), 1));
     }
     setFase(0);
+    // ¿Entra el panel abriendo hacia la derecha? Si no, se ancla a la derecha.
+    try {
+      const rect = ref.current?.getBoundingClientRect();
+      const ancho = Math.min(window.innerWidth * 0.92, 560);
+      setAlineaDerecha(!!rect && rect.left + ancho > window.innerWidth - 16);
+    } catch { setAlineaDerecha(true); }
     setOpen(true);
   };
 
@@ -153,7 +164,7 @@ export default function MenuFecha({ value, onChange, opciones = [] }) {
       </button>
 
       {open && (
-        <div className="absolute z-40 mt-1.5 left-0 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl shadow-2xl flex flex-col sm:flex-row overflow-hidden"
+        <div className={`absolute z-40 mt-1.5 ${alineaDerecha ? 'right-0' : 'left-0'} bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl shadow-2xl flex flex-col sm:flex-row overflow-hidden max-h-[min(75vh,540px)] overflow-y-auto`}
           style={{ width: 'min(92vw, 560px)' }}>
           {/* presets */}
           <div className="sm:w-[180px] shrink-0 sm:border-r border-b sm:border-b-0 border-gray-100 dark:border-gray-700/60 p-2.5 max-h-[220px] sm:max-h-none overflow-y-auto">
@@ -181,16 +192,17 @@ export default function MenuFecha({ value, onChange, opciones = [] }) {
           {/* calendario doble */}
           <div className="p-3 min-w-0">
             <div className="flex items-start gap-1">
-              <button onClick={() => setCalBase(b => new Date(b.getFullYear(), b.getMonth() - 1, 1))}
+              <button onClick={() => setCalBase(b => new Date(b.getFullYear(), b.getMonth() - 1, 1))} title="Mes anterior"
                 className="p-1 rounded-md text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-900/60"><ChevronLeft size={14} /></button>
               <div className="flex-1 flex flex-wrap justify-center gap-4">
                 <Mes base={calBase} />
                 <div className="hidden md:block"><Mes base={base2} /></div>
               </div>
-              <button onClick={() => setCalBase(b => new Date(b.getFullYear(), b.getMonth() + 1, 1))}
+              <button onClick={() => setCalBase(b => new Date(b.getFullYear(), b.getMonth() + 1, 1))} title="Mes siguiente"
                 className="p-1 rounded-md text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-900/60"><ChevronRight size={14} /></button>
             </div>
             <div className="flex items-center gap-2 flex-wrap border-t border-gray-100 dark:border-gray-700/60 mt-2.5 pt-2.5">
+              <span className="text-[10px] text-gray-400 w-full">Tocá el día de inicio y después el de fin.</span>
               <span className="text-[11px] tabular-nums px-2 py-1 rounded-md bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-200">
                 {selA ? `${corto(selA)} ${selA.getFullYear()}` : '—'}
               </span>
@@ -200,7 +212,7 @@ export default function MenuFecha({ value, onChange, opciones = [] }) {
               </span>
               <button onClick={aplicar}
                 className="ml-auto px-3.5 py-1.5 text-xs font-bold text-white bg-[#1877F2] hover:bg-[#0a5ae0] rounded-lg transition">
-                Actualizar
+                Aplicar
               </button>
             </div>
           </div>

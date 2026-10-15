@@ -14,17 +14,21 @@ html.dark {
    panel de Apariencia. Estos son los valores default (dorado Viora);
    App.jsx los sobreescribe en el <html> cuando el user elige otro color. */
 :root {
-  --brand-50: 250 244 234;
-  --brand-100: 243 230 207;
-  --brand-200: 233 210 168;
-  --brand-300: 233 201 157;
-  --brand-400: 214 176 132;
-  --brand-500: 195 152 102;
-  --brand-600: 184 137 90;
-  --brand-700: 150 112 63;
-  --brand-800: 107 74 42;
-  --brand-900: 74 51 32;
-  --brand-950: 43 29 18;
+  /* Lab Fusion (rebrand AdsLab OS): violeta como marca por defecto — antes el
+     default era el dorado Viora y el violeta dependía del accent elegido por
+     cada usuario en Apariencia. El cian y el verde menta entran como acentos
+     de interacción/éxito en los componentes, no acá. */
+  --brand-50: 245 243 255;
+  --brand-100: 237 233 254;
+  --brand-200: 221 214 254;
+  --brand-300: 196 181 253;
+  --brand-400: 167 139 250;
+  --brand-500: 139 92 246;
+  --brand-600: 124 58 237;
+  --brand-700: 109 40 217;
+  --brand-800: 91 33 182;
+  --brand-900: 76 29 149;
+  --brand-950: 46 16 101;
 }
 
 /* Foco de teclado visible GLOBAL (fallback de accesibilidad). Muchos controles

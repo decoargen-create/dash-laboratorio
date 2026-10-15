@@ -479,10 +479,10 @@ function DesgloseCampana({ campaignId, accountId, connId, currency, presupuestos
         if (muerto) return;
         if (!r.ok || d.error) setErr(d.error || `Error ${r.status}`);
         else {
-          const lista = d.adsets || [];
-          setData(lista);
-          const conGasto = lista.filter(s => Number(s.spend) > 0);
-          setAbiertos(conGasto.length === 1 ? { [conGasto[0].id]: true } : {});
+          setData(d.adsets || []);
+          // Siempre agrupado al abrir (pedido del user): los anuncios se ven
+          // recién al desplegar su conjunto.
+          setAbiertos({});
         }
       } catch (e) { if (!muerto) setErr(e.message); }
     })();
@@ -950,6 +950,9 @@ export function VistaHoy({ ads, cfg, cfgRaw, setCfg, productos, productosVisible
   // sobre estos: incluir las que ya pausaste haría que el contador mienta y
   // que confirmar un "Pausar 6" pause 2.
   const pausables = r.aPausar.filter(a => estadoVisible(a, cambios) === 'ACTIVE');
+  // Cuántas siguen prendidas HOY (con gasto): el "cuántas tengo corriendo" de
+  // un vistazo, al nivel que se esté mirando (campañas o anuncios).
+  const prendidas = conGasto.filter(a => estadoVisible(a, cambios) === 'ACTIVE').length;
 
   // Termómetro del día: qué % de la inversión de HOY se fue a lo que está
   // para pausar. No es lo mismo pausar 69K gastando 765K (9%, un día normal)
@@ -988,7 +991,13 @@ export function VistaHoy({ ads, cfg, cfgRaw, setCfg, productos, productosVisible
         productoId={productoId} currency={currency}
         abierto={verCriterios} onToggle={() => setVerCriterios(v => !v)} />
 
-      <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-2">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+        <Kpi label="Prendidas" value={String(prendidas)} tone="ok"
+          sub={esCampana ? 'campañas activas con gasto hoy' : 'anuncios activos con gasto hoy'} />
+        <Kpi label="Para apagar" value={String(pausables.length)} tone={pausables.length > 0 ? 'bad' : 'ok'}
+          sub={pausables.length > 0
+            ? (esCampana ? 'cumplen los criterios y siguen prendidas' : 'cumplen los criterios y siguen prendidos')
+            : 'nada cumple los criterios de pausa'} />
         <Kpi label="Plata que podés frenar hoy" title="Lo que esos anuncios iban a gastar de acá a la noche si no los apagás." value={fmtM(r.plataEnJuego, currency)} tone="bad"
           sub={r.plataRedirigible > 0 && r.ahorroPotencial > 0
             ? `${fmtM(r.ahorroPotencial, currency)} se ahorra · ${fmtM(r.plataRedirigible, currency)} se redirige`
@@ -1076,15 +1085,16 @@ export function VistaHoy({ ads, cfg, cfgRaw, setCfg, productos, productosVisible
                 // Sin gasto hoy (o debajo del piso) no hay nada que juzgar:
                 // "Sin datos aún", neutro — ni "va bien" ni "dejalo correr".
                 const sinDatos = i.spend <= 0 || i.spend < (cfg.pisoGastoPausar || 0);
-                const tone = p.accion === 'pausar' ? 'bad' : p.accion === 'dejar-correr' ? 'warn'
+                const tone = p.accion === 'pausar' ? 'bad' : (p.accion === 'dejar-correr' || p.accion === 'testeo') ? 'warn'
                   : opp.es ? 'up'
                   : sinDatos ? 'mute' : 'ok';
-                const label = p.accion === 'pausar' ? 'Pausar' : p.accion === 'dejar-correr' ? 'Dejalo correr'
+                const label = p.accion === 'pausar' ? 'Pausar' : p.accion === 'dejar-correr' ? 'Dejalo correr' : p.accion === 'testeo' ? '🧪 Testeo'
                   : opp.es ? '📈 Subir presupuesto'
                   : sinDatos ? 'Sin datos aún' : 'Va bien';
                 // Tooltip del veredicto: qué significa y qué hacer (para que
                 // lo entienda cualquiera, no solo quien armó las reglas).
                 const tipVeredicto = p.accion === 'pausar' ? 'Vende poco y le cuesta caro llegar al carrito. Conviene apagarlo.'
+                  : p.accion === 'testeo' ? `Viene mal, pero es nueva (${p.edadDias < 1 ? 'unas horas' : Math.floor(p.edadDias) + ' día(s)'}): es un testeo madurando. Se marca para pausar recién a los ${(a.cfgUsada || cfg).diasMinPausar ?? 2} días — destildalo en los criterios si querés que salte igual.`
                   : p.accion === 'dejar-correr' ? 'Hoy vende poco, pero la gente llega al carrito a buen precio. Esperá; la venta puede llegar más tarde.'
                   : opp.es ? 'Viene vendiendo bien hoy y toda la semana. Probá darle más plata.'
                   : sinDatos ? 'Gastó muy poco todavía para juzgarlo.'
@@ -2291,6 +2301,14 @@ function VistaReglas({ campaigns, cfg, setCfg, productos, currency, onWhy, orige
           <Campo label={`Piso de gasto para pausar (${currency || 'moneda de la cuenta'})`} help="Debajo de esto no tuvo chance."><input className={inputCls} type="number" value={cfg.pisoGastoPausar} onChange={set('pisoGastoPausar')} /></Campo>
           <Campo label="% por encima del promedio" help="Cuánto peor que la cuenta para ser candidato."><input className={inputCls} type="number" value={cfg.sobrePromedioPct} onChange={set('sobrePromedioPct')} /></Campo>
           <Campo label="Hora de corte" help="Antes de esta hora avisa que el día no maduró."><input className={inputCls} type="number" value={cfg.horaMinimaPausar} onChange={set('horaMinimaPausar')} /></Campo>
+          <Campo label="Respetar testeos" help="Campañas más nuevas que los días de abajo no se marcan para pausar: se avisan como testeo.">
+            <label className="flex items-center gap-2 text-xs text-gray-700 dark:text-gray-200 py-1.5">
+              <input type="checkbox" checked={cfg.respetarTesteos ?? true}
+                onChange={e => setCfg(c => ({ ...c, respetarTesteos: e.target.checked }))} />
+              Dejar correr los testeos nuevos
+            </label>
+          </Campo>
+          <Campo label="Días mínimos para pausar" help="Edad de la campaña desde la que ya se puede marcar para pausar."><input className={inputCls} type="number" min="0" value={cfg.diasMinPausar ?? 2} onChange={set('diasMinPausar')} disabled={!(cfg.respetarTesteos ?? true)} /></Campo>
           <Campo label="Frecuencia máxima (prospectador)"><input className={inputCls} type="number" step="0.05" value={cfg.maxFrecuenciaProsp} onChange={set('maxFrecuenciaProsp')} /></Campo>
           <Campo label="ROAS mínimo (prospectador)"><input className={inputCls} type="number" step="0.1" value={cfg.minRoasProsp} onChange={set('minRoasProsp')} /></Campo>
           <Campo label="Alcance mínimo (prospectador)"><input className={inputCls} type="number" value={cfg.minAlcanceProsp} onChange={set('minAlcanceProsp')} /></Campo>

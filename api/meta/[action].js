@@ -331,9 +331,13 @@ async function handleAdAccounts(req, res) {
     // Business Managers SOCIOS (compartidas entre BMs) no aparecen ahí. Se
     // completan con los edges de negocio (requiere business_management; si
     // el token no lo tiene, seguimos solo con lo directo).
+    const debug = url.searchParams.get('debug') === '1'
+      ? { directas: todas.length, negocios: [], bizError: null }
+      : null;
     try {
       const biz = await graphGet('me/businesses', token, { fields: 'id,name', limit: 25 });
       for (const b of (biz.data || []).slice(0, 15)) {
+        const diag = { id: b.id, name: b.name, owned: 0, client: 0, errores: [] };
         for (const edge of ['owned_ad_accounts', 'client_ad_accounts']) {
           let cursor = null;
           for (let p = 0; p < 4; p++) {
@@ -343,14 +347,20 @@ async function handleAdAccounts(req, res) {
             };
             if (cursor) params.after = cursor;
             let d;
-            try { d = await graphGet(`${b.id}/${edge}`, token, params); } catch { break; }
+            try { d = await graphGet(`${b.id}/${edge}`, token, params); }
+            catch (e) { diag.errores.push(`${edge}: ${e.message}`.slice(0, 160)); break; }
             for (const a of (d.data || [])) todas.push({ ...a, business_name: a.business_name || b.name });
+            diag[edge === 'owned_ad_accounts' ? 'owned' : 'client'] += (d.data || []).length;
             cursor = d.paging?.next && d.paging?.cursors?.after ? d.paging.cursors.after : null;
             if (!cursor) break;
           }
         }
+        if (debug) debug.negocios.push(diag);
       }
-    } catch { /* sin business_management no hay edges de negocio */ }
+    } catch (e) {
+      // sin business_management no hay edges de negocio
+      if (debug) debug.bizError = String(e.message).slice(0, 200);
+    }
 
     // account_status: 1=ACTIVE, 2=DISABLED, 3=UNSETTLED, 7=PENDING_RISK_REVIEW, ...
     const vistos = new Set();
@@ -366,7 +376,7 @@ async function handleAdAccounts(req, res) {
         timezone: a.timezone_name,
         business: a.business_name || null,
       }));
-    return respondJSON(res, 200, { accounts, total: accounts.length });
+    return respondJSON(res, 200, { accounts, total: accounts.length, ...(debug ? { debug } : {}) });
   } catch (err) {
     return respondJSON(res, err.status || 502, { error: err.message });
   }

@@ -636,15 +636,31 @@ export default function PublicarArmador({ producto, tarjetas, onVolver, onPublic
           </section>
 
 
-          {/* Barra de avance al paso 2: pegada abajo, siempre a mano */}
-          <div className="sticky bottom-3 z-30">
-            <div className="flex items-center gap-3 rounded-2xl border border-gray-200 dark:border-gray-700 bg-white/95 dark:bg-gray-900/95 backdrop-blur px-4 py-3 shadow-xl">
-              <p className="text-sm font-bold text-gray-900 dark:text-gray-100 tabular-nums">
+          {/* Barra de avance al paso 2 (prototipo A elegido): fina, pegada al
+              fondo de la pantalla a todo el ancho, con miniaturas de lo elegido.
+              Sticky (no fixed): ocupa el ancho de la columna sin pisar el menú
+              lateral, y al final del scroll queda en su lugar sin tapar nada. */}
+          <div className="sticky bottom-0 z-30 -mx-1 rounded-t-xl border-t border-x border-gray-200 dark:border-gray-700 bg-white/95 dark:bg-gray-900/95 backdrop-blur shadow-[0_-8px_24px_rgba(0,0,0,.25)]">
+            <div className="flex items-center gap-3 px-4 py-2">
+              {elegidos.length > 0 && (
+                <span className="hidden sm:flex shrink-0">
+                  {elegidos.slice(0, 5).map((x, i) => {
+                    const img = x.tipo === 'imagen' ? (estaticos || []).find(e => e.id === x.id)?.imageUrl : null;
+                    return (
+                      <span key={x.key} className={`w-7 h-7 rounded-md border-2 border-white dark:border-gray-900 overflow-hidden bg-gray-200 dark:bg-gray-700 flex items-center justify-center ${i ? '-ml-2' : ''}`}>
+                        {img ? <img src={img} alt="" className="w-full h-full object-cover" /> : <Film size={12} className="text-gray-500 dark:text-gray-400" />}
+                      </span>
+                    );
+                  })}
+                  {elegidos.length > 5 && <span className="-ml-2 w-7 h-7 rounded-md border-2 border-white dark:border-gray-900 bg-brand-600 text-white text-[10px] font-bold flex items-center justify-center">+{elegidos.length - 5}</span>}
+                </span>
+              )}
+              <p className="text-sm font-bold text-gray-900 dark:text-gray-100 tabular-nums min-w-0 truncate">
                 {elegidos.length} creativo{elegidos.length === 1 ? '' : 's'}
                 <span className="font-normal text-gray-400"> · {nVideos} video{nVideos === 1 ? '' : 's'} · {nImagenes} imagen{nImagenes === 1 ? '' : 'es'}</span>
               </p>
               <button onClick={() => setPaso(2)} disabled={elegidos.length === 0}
-                className="ml-auto inline-flex items-center gap-1.5 px-4 py-2 text-sm font-bold text-white bg-brand-600 hover:bg-brand-700 rounded-lg transition disabled:opacity-40">
+                className="ml-auto shrink-0 inline-flex items-center gap-1.5 px-4 py-2 text-sm font-bold text-white bg-brand-600 hover:bg-brand-700 rounded-lg transition disabled:opacity-40">
                 Siguiente: armar campañas <ChevronRight size={14} />
               </button>
             </div>

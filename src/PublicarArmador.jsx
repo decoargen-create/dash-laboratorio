@@ -602,7 +602,7 @@ export default function PublicarArmador({ producto, tarjetas, onVolver, onPublic
             ) : estaticos.length === 0 ? (
               <p className="text-sm text-gray-400">Este producto todavía no tiene estáticos en la galería.</p>
             ) : (
-              <div className="grid gap-1.5" style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))` }}>
+              <div className="grid gap-1.5 max-h-[58vh] overflow-y-auto overscroll-contain pr-1 rounded-lg" style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))` }}>
                 {estaticos.map(e => {
                   const k = `i:${e.id}`;
                   const on = sel.has(k);
@@ -638,9 +638,9 @@ export default function PublicarArmador({ producto, tarjetas, onVolver, onPublic
 
           {/* Barra de avance al paso 2 (prototipo A elegido): fina, pegada al
               fondo de la pantalla a todo el ancho, con miniaturas de lo elegido.
-              Sticky (no fixed): ocupa el ancho de la columna sin pisar el menú
-              lateral, y al final del scroll queda en su lugar sin tapar nada. */}
-          <div className="sticky bottom-0 z-30 -mx-1 rounded-t-xl border-t border-x border-gray-200 dark:border-gray-700 bg-white/95 dark:bg-gray-900/95 backdrop-blur shadow-[0_-8px_24px_rgba(0,0,0,.25)]">
+              Va en el flujo, quieta debajo de la galería: la galería scrollea
+              en su propio recuadro, así la barra nunca se pone encima. */}
+          <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900">
             <div className="flex items-center gap-3 px-4 py-2">
               {elegidos.length > 0 && (
                 <span className="hidden sm:flex shrink-0">

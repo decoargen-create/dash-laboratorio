@@ -2575,32 +2575,34 @@ async function handleLaunchCampaign(req, res) {
     : estructura === 'abo_bidcap' ? 'LOWEST_COST_WITH_BID_CAP' : 'COST_CAP';
   const esCbo = !estructura.startsWith('abo');
 
-  // Páginas del usuario (con su IG): para encontrar la página DUEÑA de cada
-  // post id pelado y su Instagram. Antes se componía siempre con la página
-  // elegida en el form (que por defecto era la primera de la lista) y los
-  // posts de otra página fallaban con 'La publicación no pertenece a la
-  // página del anuncio' (subcode 3858759).
+  // Páginas candidatas para los post ids pelados (sin "pageId_"): la elegida,
+  // las que la CUENTA PUBLICITARIA puede promocionar (promote_pages — incluye
+  // páginas de Business Managers que no aparecen en me/accounts, caso
+  // 348837031656775 reportado 17/10) y las que administra el usuario.
+  // La página dueña se descubre creando el creative: si Meta responde
+  // "la publicación no pertenece a la página" (subcode 3858759) probamos la
+  // siguiente. Leer el post con GET no sirve: los posts de anuncio (dark
+  // posts) no se pueden leer con el token de usuario.
   let paginas = [];
   try {
-    const pr = await graphGet('me/accounts', token, { fields: 'id,instagram_business_account{id}', limit: 100 });
-    paginas = pr.data || [];
+    const [promo, mias] = await Promise.allSettled([
+      graphGet(`${accountId}/promote_pages`, token, { fields: 'id,instagram_business_account{id}', limit: 100 }),
+      graphGet('me/accounts', token, { fields: 'id,instagram_business_account{id}', limit: 100 }),
+    ]);
+    const vistas = new Set();
+    for (const r of [promo, mias]) {
+      if (r.status !== 'fulfilled') continue;
+      for (const p of (r.value?.data || [])) {
+        if (vistas.has(String(p.id))) continue;
+        vistas.add(String(p.id)); paginas.push(p);
+      }
+    }
   } catch { paginas = []; }
   const igDePagina = new Map(paginas.map(p => [String(p.id), p.instagram_business_account?.id || null]));
-  const storyCache = new Map();
-  const resolverStory = async (postId) => {
-    if (postId.includes('_')) return postId;
-    if (storyCache.has(postId)) return storyCache.get(postId);
-    const candidatas = [pageId, ...paginas.map(p => String(p.id)).filter(id => id !== pageId)].filter(Boolean);
-    for (const pid of candidatas) {
-      try {
-        const r = await graphGet(`${pid}_${postId}`, token, { fields: 'id' });
-        if (r?.id) { storyCache.set(postId, `${pid}_${postId}`); return `${pid}_${postId}`; }
-      } catch { /* no es de esta página */ }
-    }
-    const fallback = pageId ? `${pageId}_${postId}` : postId;
-    storyCache.set(postId, fallback);
-    return fallback;
-  };
+  const candidatasPagina = [pageId, ...paginas.map(p => String(p.id)).filter(id => id !== pageId)].filter(Boolean);
+  // postId pelado → pageId que funcionó (se reusa en los otros conjuntos).
+  const paginaDePost = new Map();
+  const esNoPertenece = (msg) => /3858759|no pertenece a la p[aá]gina|does not belong to the page/i.test(String(msg || ''));
   const igPara = (storyId) => {
     if (igElegido === 'none') return null;
     if (igElegido !== 'auto') return igElegido;
@@ -2678,15 +2680,33 @@ async function handleLaunchCampaign(req, res) {
       //    con el error. Mejor una campaña con 39 de 40 y el detalle de cuál
       //    faltó que un 500 sin saber qué quedó creado en Meta.
       const crearAd = async (ad) => {
-        const storyId = await resolverStory(ad.postId);
-        const adName = ad.name || `Ad ${storyId.split('_')[1] || storyId}`;
-        const ig = igPara(storyId);
+        const adName = ad.name || `Ad ${ad.postId.split('_').pop()}`;
         try {
-          const creative = await graphPost(`${accountId}/adcreatives`, token, {
+          // Creative probando páginas hasta dar con la dueña del post.
+          const crearCreative = async (storyId) => graphPost(`${accountId}/adcreatives`, token, {
             name: adName,
             object_story_id: storyId,
-            ...(ig ? { instagram_user_id: String(ig) } : {}),
+            ...(igPara(storyId) ? { instagram_user_id: String(igPara(storyId)) } : {}),
           });
+          let creative = null;
+          if (ad.postId.includes('_')) {
+            creative = await crearCreative(ad.postId);
+          } else {
+            const conocida = paginaDePost.get(ad.postId);
+            const orden = conocida ? [conocida] : candidatasPagina;
+            let ultimoError = null;
+            for (const pid of orden) {
+              try {
+                creative = await crearCreative(`${pid}_${ad.postId}`);
+                paginaDePost.set(ad.postId, pid);
+                break;
+              } catch (e) {
+                ultimoError = e;
+                if (!esNoPertenece(e.message)) throw e;
+              }
+            }
+            if (!creative) throw new Error(`El post ${ad.postId} no es de ninguna página a la que esta cuenta tenga acceso (${candidatasPagina.length} probadas). Pegalo como «pageId_postId». ${ultimoError?.message || ''}`.trim());
+          }
           const nuevo = await graphPost(`${accountId}/ads`, token, {
             name: adName,
             adset_id: adset.id,

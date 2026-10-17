@@ -119,6 +119,8 @@ export default function PublicarCampana({ accountId, connId, currency, addToast,
   // 'auto' = el IG vinculado a la página dueña de cada post; 'none' = solo FB.
   const [igId, setIgId] = useState('auto');
   const [confirmacion, setConfirmacion] = useState(null);
+  // Progreso real de la creación (eventos que manda el server por stream).
+  const [progreso, setProgreso] = useState(null);
   const [pixelId, setPixelId] = useState('');
   const [adsText, setAdsText] = useState('');
   const [activar, setActivar] = useState(false);
@@ -283,6 +285,10 @@ export default function PublicarCampana({ accountId, connId, currency, addToast,
     setConfirmacion(null);
     if (!ok) return;
     setBusy(true); setResultado(null);
+    const nSets = conjuntos;
+    const adsPorSet = Array.from({ length: nSets }, (_, i) => (duplicarAds ? adsOk.length
+      : adsOk.filter((_, j) => j % nSets === i).length));
+    setProgreso({ campana: 'run', sets: adsPorSet.map(n => ({ estado: 'wait', total: n, ok: 0, err: 0 })), fin: 'wait' });
     try {
       const r = await fetch('/api/meta/launch-campaign', {
         method: 'POST',
@@ -297,9 +303,55 @@ export default function PublicarCampana({ accountId, connId, currency, addToast,
           conjuntos, duplicarAds, pageId, instagramUserId: igId, pixelId, pais, edadMin, edadMax,
           ads: adsOk.map(a => ({ name: a.name, postId: a.postId })),
           activar,
+          stream: true,
         }),
       });
-      const d = await r.json().catch(() => ({}));
+      // Lectura del stream NDJSON: cada línea es un paso confirmado por Meta.
+      let d = {};
+      if ((r.headers.get('content-type') || '').includes('ndjson') && r.body) {
+        const reader = r.body.getReader();
+        const dec = new TextDecoder();
+        let buf = '';
+        const aplicar = (ev) => {
+          if (ev.type === 'done') { d = ev; return; }
+          setProgreso(p => {
+            if (!p) return p;
+            const sets = p.sets.map(x => ({ ...x }));
+            if (ev.type === 'campaign') return { ...p, campana: 'done', sets: sets.map((x, i) => (i === 0 ? { ...x, estado: 'run' } : x)) };
+            if (ev.type === 'adset' && sets[ev.i]) {
+              sets[ev.i].estado = ev.ok ? 'run' : 'err';
+              if (!ev.ok && sets[ev.i + 1]) sets[ev.i + 1].estado = 'run';
+              return { ...p, sets };
+            }
+            if (ev.type === 'ad' && sets[ev.i]) {
+              const x = sets[ev.i];
+              if (ev.ok) x.ok++; else x.err++;
+              if (x.ok + x.err >= x.total) {
+                x.estado = x.err ? (x.ok ? 'warn' : 'err') : 'done';
+                if (sets[ev.i + 1] && sets[ev.i + 1].estado === 'wait') sets[ev.i + 1].estado = 'run';
+              }
+              const todos = sets.every(z => ['done', 'warn', 'err'].includes(z.estado));
+              return { ...p, sets, fin: todos ? 'run' : p.fin };
+            }
+            return p;
+          });
+        };
+        for (;;) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          buf += dec.decode(value, { stream: true });
+          let k;
+          while ((k = buf.indexOf('\n')) >= 0) {
+            const linea = buf.slice(0, k).trim(); buf = buf.slice(k + 1);
+            if (linea) { try { aplicar(JSON.parse(linea)); } catch {} }
+          }
+        }
+        if (buf.trim()) { try { aplicar(JSON.parse(buf.trim())); } catch {} }
+        setProgreso(p => (p ? { ...p, fin: 'done', campana: d.campaignId ? 'done' : 'err' } : p));
+      } else {
+        d = await r.json().catch(() => ({}));
+        setProgreso(null);
+      }
       setResultado(d);
       if (d.campaignId && d.ok) addToast?.({ type: 'success', message: `🚀 "${nombre}" creada en Meta (${d.creados} ads, ${d.estado === 'ACTIVE' ? 'ACTIVA' : 'pausada'})` });
       else if (d.campaignId) addToast?.({ type: 'warning', message: 'Campaña creada con detalles — mirá el resumen.' });
@@ -522,6 +574,32 @@ export default function PublicarCampana({ accountId, connId, currency, addToast,
         </button>
         {!listo && <span className="text-[11px] text-gray-400">Completá nombre, presupuesto{receta.puja ? ', puja' : ''}, píxel y al menos un anuncio.</span>}
       </div>
+
+      {/* Progreso real (prototipo B): pasos que se tildan a medida que Meta
+          confirma la campaña, cada conjunto y sus anuncios. */}
+      {progreso && (busy || !resultado) && (
+        <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800/60 p-4 space-y-2.5">
+          {[
+            { label: 'Campaña', estado: progreso.campana },
+            ...progreso.sets.map((x, i) => ({
+              label: `Conjunto ${i + 1} · ${x.total} anuncio${x.total === 1 ? '' : 's'}`,
+              estado: x.estado,
+              det: x.ok + x.err > 0 ? `${x.ok}/${x.total} creados${x.err ? ` · ${x.err} con error` : ''}` : null,
+            })),
+            { label: 'Revisión final', estado: progreso.fin },
+          ].map((p, i) => (
+            <div key={i} className={`flex items-center gap-2.5 text-[13px] ${p.estado === 'wait' ? 'text-gray-400' : 'text-gray-800 dark:text-gray-100'}`}>
+              {p.estado === 'done' ? <CheckCircle2 size={17} className="text-emerald-500 shrink-0" />
+                : p.estado === 'run' ? <Loader2 size={17} className="animate-spin text-brand-500 shrink-0" />
+                : p.estado === 'err' ? <XCircle size={17} className="text-red-500 shrink-0" />
+                : p.estado === 'warn' ? <AlertCircle size={17} className="text-amber-500 shrink-0" />
+                : <span className="w-[17px] h-[17px] rounded-full border-2 border-gray-300 dark:border-gray-600 shrink-0" />}
+              <span className="font-semibold">{p.label}</span>
+              {p.det && <span className="text-[11.5px] text-gray-400 tabular-nums">{p.det}</span>}
+            </div>
+          ))}
+        </div>
+      )}
 
       {/* resultado */}
       {resultado && (

@@ -2575,7 +2575,26 @@ async function handleLaunchCampaign(req, res) {
     : estructura === 'abo_bidcap' ? 'LOWEST_COST_WITH_BID_CAP' : 'COST_CAP';
   const esCbo = !estructura.startsWith('abo');
 
-  // Páginas candidatas para los post ids pelados (sin "pageId_"): la elegida,
+  // PROGRESO REAL (pedido del user: barra de pasos con tildes): con
+  // body.stream la respuesta es NDJSON y se emite un evento por cada cosa que
+  // Meta confirma (campaña, cada conjunto, cada anuncio) y al final el
+  // resultado. Sin stream, responde igual que siempre (un JSON al final).
+  const stream = body.stream === true;
+  const emit = (ev) => { if (stream) { try { res.write(JSON.stringify(ev) + '\n'); } catch {} } };
+  const terminar = (status, obj) => {
+    if (!stream) return respondJSON(res, status, obj);
+    emit({ type: 'done', status, ...obj });
+    return res.end();
+  };
+  if (stream) {
+    res.status(200);
+    res.setHeader('Content-Type', 'application/x-ndjson; charset=utf-8');
+    res.setHeader('Cache-Control', 'no-cache, no-transform');
+    res.setHeader('X-Accel-Buffering', 'no');
+    emit({ type: 'start' });
+  }
+
+    // Páginas candidatas para los post ids pelados (sin "pageId_"): la elegida,
   // las que la CUENTA PUBLICITARIA puede promocionar (promote_pages — incluye
   // páginas de Business Managers que no aparecen en me/accounts, caso
   // 348837031656775 reportado 17/10) y las que administra el usuario.
@@ -2637,6 +2656,7 @@ async function handleLaunchCampaign(req, res) {
     else campParams.is_adset_budget_sharing_enabled = 'false';
     const camp = await graphPost(`${accountId}/campaigns`, token, campParams);
     resumen.campaignId = camp.id;
+    emit({ type: 'campaign', id: camp.id });
 
     // 2. Conjuntos.
     //    duplicar → cada conjunto lleva TODOS los anuncios (Deep Pocket: 8
@@ -2677,10 +2697,12 @@ async function handleLaunchCampaign(req, res) {
         adset = await graphPost(`${accountId}/adsets`, token, adsetParams);
       } catch (e) {
         resumen.errores.push(`Conjunto C${i + 1}: ${e.message}`);
+        emit({ type: 'adset', i, ok: false, error: e.message, ads: grupo.length });
         continue;
       }
       const fila = { id: adset.id, name: adsetParams.name, ads: [] };
       resumen.adsets.push(fila);
+      emit({ type: 'adset', i, ok: true, ads: grupo.length });
 
       // 3. Anuncios del conjunto: creative desde el post existente + ad.
       //    De a CONCURRENCIA_ADS en paralelo: con 8 conjuntos duplicados esto
@@ -2730,7 +2752,11 @@ async function handleLaunchCampaign(req, res) {
         }
       };
       for (let j = 0; j < grupo.length; j += CONCURRENCIA_ADS) {
-        const tanda = await Promise.all(grupo.slice(j, j + CONCURRENCIA_ADS).map(crearAd));
+        const tanda = await Promise.all(grupo.slice(j, j + CONCURRENCIA_ADS).map(async (ad) => {
+          const r = await crearAd(ad);
+          emit({ type: 'ad', i, ok: r.ok, name: r.name, error: r.error || null });
+          return r;
+        }));
         fila.ads.push(...tanda);
       }
     }
@@ -2756,7 +2782,7 @@ async function handleLaunchCampaign(req, res) {
         });
       }
     } catch { /* historial best-effort */ }
-    return respondJSON(res, 200, {
+    return terminar(200, {
       ok: resumen.errores.length === 0 && creados > 0,
       ...resumen,
       creados,
@@ -2764,7 +2790,7 @@ async function handleLaunchCampaign(req, res) {
     });
   } catch (e) {
     // Si la campaña no llegó a crearse, no quedó nada colgado en Meta.
-    return respondJSON(res, e.status && e.status < 500 ? e.status : 500, {
+    return terminar(e.status && e.status < 500 ? e.status : 500, {
       error: e.message,
       ...resumen,
     });

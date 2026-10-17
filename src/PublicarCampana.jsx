@@ -117,6 +117,8 @@ export default function PublicarCampana({ accountId, connId, currency, addToast,
   // AR · 18-65 con Advantage+, que es como arma los testeos el equipo.
   const pais = 'AR', edadMin = 18, edadMax = 65;
   const [pageId, setPageId] = useState('');
+  // 'auto' = el IG vinculado a la página dueña de cada post; 'none' = solo FB.
+  const [igId, setIgId] = useState('auto');
   const [pixelId, setPixelId] = useState('');
   const [adsText, setAdsText] = useState('');
   const [activar, setActivar] = useState(false);
@@ -248,7 +250,7 @@ export default function PublicarCampana({ accountId, connId, currency, addToast,
           presupuesto: num(presupuesto), puja: receta.puja ? num(puja) : 0,
           pujas: receta.puja && esAbo ? Array.from({ length: conjuntos }, (_, i) => num(pujaDelSet(i))) : undefined,
           startTime: programada ? `${programada}:00-03:00` : undefined,
-          conjuntos, duplicarAds, pageId, pixelId, pais, edadMin, edadMax,
+          conjuntos, duplicarAds, pageId, instagramUserId: igId, pixelId, pais, edadMin, edadMax,
           ads: adsOk.map(a => ({ name: a.name, postId: a.postId })),
           activar,
         }),
@@ -369,7 +371,7 @@ export default function PublicarCampana({ accountId, connId, currency, addToast,
         )}
 
         {/* Cuenta y programación */}
-        <div className="grid sm:grid-cols-2 gap-3 items-start">
+        <div className="grid sm:grid-cols-3 gap-3 items-start">
           <Campo label="Píxel (evento Compra)">
             <select className={inputCls} value={pixelId} onChange={e => setPixelId(e.target.value)}>
               {!prereqs && <option>Cargando…</option>}
@@ -377,10 +379,23 @@ export default function PublicarCampana({ accountId, connId, currency, addToast,
               {(prereqs?.pixels || []).map(p => <option key={p.id} value={p.id}>{p.name || p.id}</option>)}
             </select>
           </Campo>
-          <Campo label="Página (para post ids sin «_»)">
+          <Campo label="Página de Facebook"
+            hint="Si un post es de otra página tuya, se detecta sola.">
             <select className={inputCls} value={pageId} onChange={e => setPageId(e.target.value)}>
               {(prereqs?.pages || []).map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
               {prereqs?.pages?.length === 0 && <option value="">Sin páginas visibles</option>}
+            </select>
+          </Campo>
+          <Campo label="Instagram"
+            hint="Automático: la cuenta de IG vinculada a la página de cada post.">
+            <select className={inputCls} value={igId} onChange={e => setIgId(e.target.value)}>
+              <option value="auto">Automático (IG de la página)</option>
+              {(prereqs?.pages || []).filter(p => p.instagram_business_account?.id).map(p => (
+                <option key={p.instagram_business_account.id} value={p.instagram_business_account.id}>
+                  @{p.instagram_business_account.username || p.instagram_business_account.id} · {p.name}
+                </option>
+              ))}
+              <option value="none">Sin Instagram (solo Facebook)</option>
             </select>
           </Campo>
         </div>

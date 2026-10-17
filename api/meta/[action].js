@@ -2463,7 +2463,7 @@ async function handleLaunchPrereqs(req, res) {
   try {
     const [pixelsR, pagesR] = await Promise.allSettled([
       graphGet(`${accountId}/adspixels`, token, { fields: 'id,name', limit: 25 }),
-      graphGet('me/accounts', token, { fields: 'id,name', limit: 50 }),
+      graphGet('me/accounts', token, { fields: 'id,name,instagram_business_account{id,username}', limit: 100 }),
     ]);
     return respondJSON(res, 200, {
       pixels: pixelsR.status === 'fulfilled' ? (pixelsR.value.data || []) : [],
@@ -2522,6 +2522,10 @@ async function handleLaunchCampaign(req, res) {
   const duplicarAds = body.duplicarAds !== false;
   const pageId = String(body.pageId || '').trim();
   const pixelId = String(body.pixelId || '').trim();
+  // Instagram del anuncio: 'auto' (default) = el IG vinculado a la página dueña
+  // de cada post; un id = esa cuenta para todos; 'none' = solo Facebook.
+  // Sin esto los anuncios salían SOLO en Facebook (reportado 17/10).
+  const igElegido = String(body.instagramUserId || 'auto').trim() || 'auto';
   // ABO: puja POR CONJUNTO (array alineado con los conjuntos); si un índice
   // falta o es inválido, cae a la puja base.
   const pujasArr = Array.isArray(body.pujas) ? body.pujas.map(Number) : null;
@@ -2570,6 +2574,38 @@ async function handleLaunchCampaign(req, res) {
   const bidStrategy = estructura === 'cbo_deep' ? 'LOWEST_COST_WITHOUT_CAP'
     : estructura === 'abo_bidcap' ? 'LOWEST_COST_WITH_BID_CAP' : 'COST_CAP';
   const esCbo = !estructura.startsWith('abo');
+
+  // Páginas del usuario (con su IG): para encontrar la página DUEÑA de cada
+  // post id pelado y su Instagram. Antes se componía siempre con la página
+  // elegida en el form (que por defecto era la primera de la lista) y los
+  // posts de otra página fallaban con 'La publicación no pertenece a la
+  // página del anuncio' (subcode 3858759).
+  let paginas = [];
+  try {
+    const pr = await graphGet('me/accounts', token, { fields: 'id,instagram_business_account{id}', limit: 100 });
+    paginas = pr.data || [];
+  } catch { paginas = []; }
+  const igDePagina = new Map(paginas.map(p => [String(p.id), p.instagram_business_account?.id || null]));
+  const storyCache = new Map();
+  const resolverStory = async (postId) => {
+    if (postId.includes('_')) return postId;
+    if (storyCache.has(postId)) return storyCache.get(postId);
+    const candidatas = [pageId, ...paginas.map(p => String(p.id)).filter(id => id !== pageId)].filter(Boolean);
+    for (const pid of candidatas) {
+      try {
+        const r = await graphGet(`${pid}_${postId}`, token, { fields: 'id' });
+        if (r?.id) { storyCache.set(postId, `${pid}_${postId}`); return `${pid}_${postId}`; }
+      } catch { /* no es de esta página */ }
+    }
+    const fallback = pageId ? `${pageId}_${postId}` : postId;
+    storyCache.set(postId, fallback);
+    return fallback;
+  };
+  const igPara = (storyId) => {
+    if (igElegido === 'none') return null;
+    if (igElegido !== 'auto') return igElegido;
+    return igDePagina.get(String(storyId).split('_')[0]) || null;
+  };
 
   const resumen = { campaignId: null, adsets: [], errores: [] };
   try {
@@ -2642,12 +2678,14 @@ async function handleLaunchCampaign(req, res) {
       //    con el error. Mejor una campaña con 39 de 40 y el detalle de cuál
       //    faltó que un 500 sin saber qué quedó creado en Meta.
       const crearAd = async (ad) => {
-        const storyId = ad.postId.includes('_') ? ad.postId : `${pageId}_${ad.postId}`;
+        const storyId = await resolverStory(ad.postId);
         const adName = ad.name || `Ad ${storyId.split('_')[1] || storyId}`;
+        const ig = igPara(storyId);
         try {
           const creative = await graphPost(`${accountId}/adcreatives`, token, {
             name: adName,
             object_story_id: storyId,
+            ...(ig ? { instagram_user_id: String(ig) } : {}),
           });
           const nuevo = await graphPost(`${accountId}/ads`, token, {
             name: adName,

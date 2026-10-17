@@ -122,6 +122,42 @@ export default function PublicarCampana({ accountId, connId, currency, addToast,
   const [pixelId, setPixelId] = useState('');
   const [adsText, setAdsText] = useState('');
   const [activar, setActivar] = useState(false);
+
+  // ÚLTIMA CONFIGURACIÓN por cuenta publicitaria (pedido del user): receta,
+  // presupuesto, pujas, conjuntos, página, Instagram, píxel y "crear activa"
+  // quedan como los dejaste la última vez. Los anuncios y la fecha no (son
+  // de cada tirada).
+  const cfgKey = `adslab-escalar-cfg-${accountId}`;
+  const cfgCargada = useRef(false);
+  // Al restaurar, el efecto de "cambiar de receta trae sus números" NO tiene
+  // que pisar lo restaurado: se saltea hasta ver la receta restaurada.
+  const restaurada = useRef(null);
+  useEffect(() => {
+    cfgCargada.current = false;
+    try {
+      const c = JSON.parse(localStorage.getItem(cfgKey) || 'null');
+      if (c) {
+        restaurada.current = { estructura: c.estructura || estructura };
+        if (c.estructura) setEstructura(c.estructura);
+        if (c.presupuesto != null) setPresupuesto(c.presupuesto);
+        if (c.puja != null) setPuja(c.puja);
+        if (c.pujas) setPujas(c.pujas);
+        if (c.conjuntos) setConjuntos(c.conjuntos);
+        if (typeof c.duplicarAds === 'boolean') setDuplicarAds(c.duplicarAds);
+        if (c.pageId) setPageId(c.pageId);
+        if (c.igId) setIgId(c.igId);
+        if (c.pixelId) setPixelId(c.pixelId);
+        if (typeof c.activar === 'boolean') setActivar(c.activar);
+      }
+    } catch {}
+    cfgCargada.current = true;
+  }, [cfgKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (!cfgCargada.current || !accountId) return;
+    try {
+      localStorage.setItem(cfgKey, JSON.stringify({ estructura, presupuesto, puja, pujas, conjuntos, duplicarAds, pageId, igId, pixelId, activar }));
+    } catch {}
+  }, [cfgKey, accountId, estructura, presupuesto, puja, pujas, conjuntos, duplicarAds, pageId, igId, pixelId, activar]);
   const [prereqs, setPrereqs] = useState(null);
   const [busy, setBusy] = useState(false);
   const [resultado, setResultado] = useState(null);
@@ -151,6 +187,10 @@ export default function PublicarCampana({ accountId, connId, currency, addToast,
   // receta es justamente pedir otra configuración.
   useEffect(() => {
     if (!receta) return;
+    if (restaurada.current) {
+      if (restaurada.current.estructura === estructura) restaurada.current = null;
+      return;
+    }
     setConjuntos(receta.conjuntos ?? 1);
     const def = presupuestoDefault(receta, currency);
     setPresupuesto(def != null ? String(def) : '');
@@ -195,8 +235,9 @@ export default function PublicarCampana({ accountId, connId, currency, addToast,
         const d = await r.json().catch(() => ({}));
         if (muerto) return;
         setPrereqs(d);
-        if (!pixelId && d.pixels?.[0]) setPixelId(d.pixels[0].id);
-        if (!pageId && d.pages?.[0]) setPageId(d.pages[0].id);
+        // Lo guardado manda; si no existe en esta cuenta, el primero.
+        setPixelId(prev => (prev && (d.pixels || []).some(p => p.id === prev)) ? prev : (d.pixels?.[0]?.id || ''));
+        setPageId(prev => (prev && (d.pages || []).some(p => p.id === prev)) ? prev : (d.pages?.[0]?.id || ''));
       } catch { if (!muerto) setPrereqs({ pixels: [], pages: [] }); }
     })();
     return () => { muerto = true; };
@@ -426,7 +467,7 @@ export default function PublicarCampana({ accountId, connId, currency, addToast,
             </select>
           </Campo>
           <Campo label="Instagram"
-            hint="Automático: la cuenta de IG vinculada a la página de cada post.">
+            hint="Automático: el IG de la página del post o, si no tiene, el de la página elegida.">
             <select className={inputCls} value={igId} onChange={e => setIgId(e.target.value)}>
               <option value="auto">Automático (IG de la página)</option>
               {(prereqs?.pages || []).filter(p => p.instagram_business_account?.id).map(p => (

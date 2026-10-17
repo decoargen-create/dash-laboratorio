@@ -93,7 +93,10 @@ export function useMarketingSync({ addToast } = {}) {
       if (mig?.migrated) addToast?.({ type: 'success', message: `Migrados ${mig.productos} productos al cloud` });
       await pullMarketingFromCloud();
       pullCompletedRef.current = true;
-      if (mountedRef?.current !== false) setStatus('ok');
+      // Siempre: si el efecto se re-montó durante el pull, el indicador
+      // quedaba trabado en "Sincronizando…" para siempre.
+      setStatus('ok');
+      try { window.dispatchEvent(new Event('viora:marketing-pulled')); } catch {}
 
       // Migración soft de creativos IDB → cloud, en background (no
       // bloquea el resto del sync). Solo corre la primera vez por user.
@@ -117,7 +120,7 @@ export function useMarketingSync({ addToast } = {}) {
       })();
     } catch (err) {
       console.warn('[sync] pull error:', err.message);
-      if (mountedRef?.current !== false) { setStatus('error'); setLastError(err.message); }
+      setStatus('error'); setLastError(err.message);
       addToast?.({ type: 'error', message: `Sync error: ${err.message}` });
     } finally {
       pullingRef.current = false;

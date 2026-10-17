@@ -11,10 +11,9 @@
 
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
-  Rocket, Loader2, AlertCircle, CheckCircle2, XCircle, ExternalLink,
+  Rocket, Loader2, AlertCircle, CheckCircle2, XCircle, ExternalLink, X,
 } from 'lucide-react';
 import { authHeaders } from './MetaConnect.jsx';
-import { confirmDialog } from './dialogs.jsx';
 import FechaHoraPicker from './FechaHoraPicker.jsx';
 
 // Cada receta trae los números con los que el equipo la arma siempre. Son
@@ -119,6 +118,7 @@ export default function PublicarCampana({ accountId, connId, currency, addToast,
   const [pageId, setPageId] = useState('');
   // 'auto' = el IG vinculado a la página dueña de cada post; 'none' = solo FB.
   const [igId, setIgId] = useState('auto');
+  const [confirmacion, setConfirmacion] = useState(null);
   const [pixelId, setPixelId] = useState('');
   const [adsText, setAdsText] = useState('');
   const [activar, setActivar] = useState(false);
@@ -218,25 +218,28 @@ export default function PublicarCampana({ accountId, connId, currency, addToast,
   const publicar = async () => {
     if (!listo || busy) return;
     const presupuestoTxt = `$${num(presupuesto).toLocaleString('es-AR')}${estructura.startsWith('abo') ? ' por conjunto' : ''} / día`;
-    const ok = await confirmDialog({
-      title: `🚀 Crear "${nombre}" en Meta`,
-      message: [
-        `${receta.emoji} ${receta.titulo} · ${conjuntos} conjunto${conjuntos === 1 ? '' : 's'}`,
-        duplicarAds && conjuntos > 1
-          ? `${adsOk.length} anuncio${adsOk.length === 1 ? '' : 's'} en CADA conjunto → ${totalAds} anuncios en total`
-          : `${adsOk.length} anuncio${adsOk.length === 1 ? '' : 's'} repartido${adsOk.length === 1 ? '' : 's'} entre los conjuntos`,
-        `Presupuesto: ${presupuestoTxt}${receta.puja && !esAbo ? ` · ${receta.puja.toLowerCase()}: $${num(puja).toLocaleString('es-AR')}` : ''}`,
-        ...(receta.puja && esAbo
-          ? [`${receta.puja} por conjunto: ${Array.from({ length: conjuntos }, (_, i) => `C${i + 1} $${num(pujaDelSet(i)).toLocaleString('es-AR')}`).join(' · ')}`]
-          : []),
-        `${pais} · ${edadMin}-${edadMax} años · Advantage+ audience y ubicaciones automáticas`,
-        ...(programada ? [`🗓 Programada para el ${new Date(`${programada}:00-03:00`).toLocaleString('es-AR', { timeZone: 'America/Argentina/Buenos_Aires', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })} hs (AR) — no gasta antes.`] : []),
-        activar ? (programada ? 'Se crea ACTIVA pero PROGRAMADA: arranca recién en esa fecha.' : '⚠️ Se crea ACTIVA: empieza a gastar al toque.')
-          : (programada ? '⚠️ Se crea PAUSADA: aunque esté programada, NO va a arrancar hasta que la actives en Meta.' : 'Se crea PAUSADA: la revisás en Meta y la encendés.'),
-      ].join('\n'),
-      confirmLabel: 'Crear en Meta',
-      tone: activar ? 'danger' : 'brand',
-    });
+    // Confirmación estilo checklist (prototipo F elegido): el cartel viejo
+    // usaba ⚠️ + botón rojo y parecía un error.
+    const fmtFecha = (v) => new Date(`${v}:00-03:00`).toLocaleString('es-AR', { timeZone: 'America/Argentina/Buenos_Aires', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+    const igTxt = igId === 'none' ? 'solo Facebook (sin Instagram)'
+      : igId === 'auto' ? 'con el Instagram de cada página'
+      : `con @${(prereqs?.pages || []).find(p => p.instagram_business_account?.id === igId)?.instagram_business_account?.username || 'Instagram'}`;
+    const items = [
+      { ok: true, txt: `${receta.titulo}${receta.puja && !esAbo ? ` · ${receta.puja.toLowerCase()} $${num(puja).toLocaleString('es-AR')}` : ''}` },
+      ...(receta.puja && esAbo ? [{ ok: true, txt: `${receta.puja} por conjunto: ${Array.from({ length: conjuntos }, (_, i) => `C${i + 1} $${num(pujaDelSet(i)).toLocaleString('es-AR')}`).join(' · ')}` }] : []),
+      { ok: true, txt: presupuestoTxt },
+      { ok: true, txt: `${conjuntos} conjunto${conjuntos === 1 ? '' : 's'} · ${duplicarAds && conjuntos > 1 ? `${totalAds} anuncios (${adsOk.length} en cada uno)` : `${adsOk.length} anuncio${adsOk.length === 1 ? '' : 's'}`} ${igTxt}` },
+      { ok: true, txt: `${pais} · ${edadMin}-${edadMax} años · Advantage+` },
+      programada
+        ? (activar
+          ? { ok: true, txt: `Programada para el ${fmtFecha(programada)} hs — no gasta antes` }
+          : { ok: false, txt: `Programada para el ${fmtFecha(programada)} hs, pero se crea PAUSADA: no arranca hasta que la actives en Meta` })
+        : (activar
+          ? { ok: false, txt: 'Se crea ACTIVA: empieza a gastar apenas se crea' }
+          : { ok: true, txt: 'Se crea pausada: la revisás en Meta y la encendés' }),
+    ];
+    const ok = await new Promise(resolve => setConfirmacion({ titulo: nombre.trim(), items, resolve }));
+    setConfirmacion(null);
     if (!ok) return;
     setBusy(true); setResultado(null);
     try {
@@ -267,6 +270,42 @@ export default function PublicarCampana({ accountId, connId, currency, addToast,
 
   return (
     <div className="space-y-4">
+      {confirmacion && (
+        <div className="fixed inset-0 z-[80] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => confirmacion.resolve(false)}>
+          <div className="w-full max-w-md rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 shadow-2xl overflow-hidden" onClick={e => e.stopPropagation()}>
+            <div className="flex gap-1 px-5 pt-4">
+              {[0, 1, 2].map(i => <span key={i} className="flex-1 h-1 rounded-full bg-brand-500" />)}
+            </div>
+            <div className="flex items-start gap-3 px-5 pt-4 pb-2">
+              <span className="w-9 h-9 rounded-xl bg-emerald-500/15 text-emerald-500 flex items-center justify-center shrink-0"><CheckCircle2 size={19} /></span>
+              <div className="min-w-0 flex-1">
+                <p className="text-[15px] font-extrabold text-gray-900 dark:text-gray-100">
+                  {confirmacion.items.every(i => i.ok) ? 'Todo listo para lanzar' : 'Revisá antes de lanzar'}
+                </p>
+                <p className="text-xs text-gray-500 dark:text-gray-400 break-words">{confirmacion.titulo}</p>
+              </div>
+              <button onClick={() => confirmacion.resolve(false)} className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200"><X size={16} /></button>
+            </div>
+            <ul className="px-5 pb-4 pt-1 space-y-2">
+              {confirmacion.items.map((it, i) => (
+                <li key={i} className={`flex items-start gap-2 text-[13px] leading-snug ${it.ok ? 'text-gray-700 dark:text-gray-200' : 'text-amber-600 dark:text-amber-400'}`}>
+                  {it.ok
+                    ? <CheckCircle2 size={15} className="text-emerald-500 shrink-0 mt-0.5" />
+                    : <AlertCircle size={15} className="shrink-0 mt-0.5" />}
+                  <span>{it.txt}</span>
+                </li>
+              ))}
+            </ul>
+            <div className="flex justify-end gap-2 px-5 py-3 border-t border-gray-100 dark:border-gray-800">
+              <button onClick={() => confirmacion.resolve(false)} className="px-4 py-2 text-sm font-semibold text-gray-500 hover:text-gray-800 dark:hover:text-gray-200">Volver</button>
+              <button onClick={() => confirmacion.resolve(true)} autoFocus
+                className="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-bold text-white bg-brand-600 hover:bg-brand-700 rounded-lg transition">
+                <Rocket size={14} /> Crear en Meta
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       {/* receta */}
       {/* Las 4 recetas en UNA línea en pantallas anchas (pedido del user). */}
       <div className="grid sm:grid-cols-2 xl:grid-cols-4 gap-2.5">

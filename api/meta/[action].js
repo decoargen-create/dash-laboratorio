@@ -2603,10 +2603,21 @@ async function handleLaunchCampaign(req, res) {
   // postId pelado → pageId que funcionó (se reusa en los otros conjuntos).
   const paginaDePost = new Map();
   const esNoPertenece = (msg) => /3858759|no pertenece a la p[aá]gina|does not belong to the page/i.test(String(msg || ''));
+  // Fallback del modo automático: si la página dueña del post no tiene IG
+  // vinculado (ej. "Vane Navarro"), va el IG de la página elegida en el form
+  // (Natural VYA → naturalvya.arg) y, si tampoco, la primera cuenta de IG de
+  // la cuenta publicitaria. Antes quedaba "Usar página de Facebook".
+  let igCuenta = null;
+  if (igElegido === 'auto' && !igDePagina.get(String(pageId))) {
+    try {
+      const r = await graphGet(`${accountId}/instagram_accounts`, token, { fields: 'id', limit: 5 });
+      igCuenta = r.data?.[0]?.id || null;
+    } catch { igCuenta = null; }
+  }
   const igPara = (storyId) => {
     if (igElegido === 'none') return null;
     if (igElegido !== 'auto') return igElegido;
-    return igDePagina.get(String(storyId).split('_')[0]) || null;
+    return igDePagina.get(String(storyId).split('_')[0]) || igDePagina.get(String(pageId)) || igCuenta || null;
   };
 
   const resumen = { campaignId: null, adsets: [], errores: [] };

@@ -2652,9 +2652,9 @@ function AppShell({ onExit }) {
         </div>
       </main>
 
-      {/* Copiloto proactivo — botón flotante con sugerencias contextuales
-          basadas en heurísticas del state local. Solo en marketing platform. */}
-      {currentPlatform === 'marketing' && (
+      {/* Copiloto proactivo — botón flotante sacado de la vista (pedido del
+          user 17/10). El componente queda por si se quiere volver a montar. */}
+      {false && currentPlatform === 'marketing' && (
         <ClaudeProactivoSidebar
           onNavigate={(section, productoId) => {
             if (productoId) {

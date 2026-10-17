@@ -122,6 +122,7 @@ import { setCompAds, getCompAds, hydrateCompetidoresAds, removeCompAds } from '.
 import { stringifyApiError } from './apiHelpers.js';
 import { trackQuotaFailure, isQuotaError, removeFromQuotaQueue } from './quotaRetryStore.js';
 import AnimatedCounter from './AnimatedCounter.jsx';
+import { getSyncStatus, subscribeSyncStatus } from './syncStatusStore.js';
 import ProductoCostsModal from './ProductoCostsModal.jsx';
 import ProductoHistorialModal from './ProductoHistorialModal.jsx';
 
@@ -988,6 +989,11 @@ function StepRow({ step, liveIdeas, onRerun, rerunBusy = false }) {
 
 
 export default function ArranqueSection({ addToast, onGoToSection }) {
+  // Mientras se traen los productos de la nube (login en una PC nueva o con
+  // la caché vacía) NO mostramos el onboarding de "primer producto": confundía,
+  // parecía que se habían borrado todos. Mostramos un "trayendo…" en su lugar.
+  const [sincronizando, setSincronizando] = useState(() => getSyncStatus()?.status === 'pulling');
+  useEffect(() => subscribeSyncStatus(s => setSincronizando(s.status === 'pulling')), []);
   const [productos, setProductos] = useState(() => {
     const prods = loadJSON(PRODUCTOS_KEY, []);
     let mutated = false;
@@ -3358,7 +3364,13 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
         )}
 
         {/* Lista de productos existentes */}
-        {productos.length === 0 ? (
+        {productos.length === 0 && sincronizando ? (
+          <div className="border border-gray-200 dark:border-gray-700 rounded-2xl p-10 flex flex-col items-center gap-3 text-center">
+            <Loader2 size={22} className="animate-spin text-brand-500" />
+            <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">Trayendo tus productos…</p>
+            <p className="text-xs text-gray-400">Se están sincronizando desde la nube. Tarda unos segundos.</p>
+          </div>
+        ) : productos.length === 0 ? (
           /* ONBOARDING DE PRIMER USO — un usuario nuevo cae acá sin productos.
              En vez de un empty-state seco, lo recibimos, le mostramos el flujo
              en 3 pasos y le damos un CTA claro para arrancar. */

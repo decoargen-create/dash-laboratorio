@@ -2144,10 +2144,11 @@ export default async function handler(req, res) {
           const promptStr = prompts?.[i]?.prompt
             || (typeof __legacyPromptRef !== 'undefined' ? __legacyPromptRef : null);
           try {
-            const { storagePath, imageUrl } = await uploadCreativoToBucket(userId, refId, b64);
+            const { storagePath, imageUrl, thumbPath } = await uploadCreativoToBucket(userId, refId, b64);
             console.info(`[cloud save] imagen ${i + 1}/${imagenes.length} subida → ${storagePath}`);
             const row = await insertCreativoRow({
               id: refId,
+              thumb_path: thumbPath || null,
               user_id: userId,
               producto_id: productoId,
               source_ad_id: sourceAdId,

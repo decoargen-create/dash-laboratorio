@@ -185,7 +185,7 @@ const ANGLE_LABELS = {
 // Evento → slug corto para el nombre de archivo.
 const EVENTO_SLUGS = {
   dia_madre: 'DiaMadre', dia_padre: 'DiaPadre', dia_nino: 'DiaNino',
-  san_valentin: 'SanValentin', hot_sale: 'HotSale', cyber_monday: 'Cyber',
+  san_valentin: 'SanValentin', hot_sale: 'HotSale', cyber_monday: 'Cyber', pre_cyber: 'PreCyber', cyber_teaser: 'YaLlega', cyber_week: 'CyberWeek',
   black_friday: 'BlackFriday', navidad: 'Navidad', ano_nuevo: 'AnoNuevo', reyes: 'Reyes',
 };
 

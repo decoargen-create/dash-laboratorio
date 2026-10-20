@@ -15,7 +15,7 @@
 
 import { runActorSync, runActorAsync, normalizeAd, scoreAd, buildAdLibraryUrl, WINNER_CRITERIA } from './_apify.js';
 import { upsertAdsToIndex } from './_ads-index.js';
-import { getUserIdFromAuth } from './_supabase-server.js';
+import { getUserIdFromAuth, getServiceClient, guardarImagenAd } from './_supabase-server.js';
 
 const DEFAULT_ACTOR = 'apify/facebook-ads-scraper';
 
@@ -240,6 +240,30 @@ export default async function handler(req, res) {
     scored.sort((a, b) => b.score - a.score);
 
     const winnersCount = scored.filter(a => a.isWinner).length;
+
+    // COPIA PERMANENTE de las imágenes (la URL de Meta vence en días). De a 10
+    // en paralelo y con tope de tiempo: lo que no entre queda con la URL del
+    // CDN y el cliente lo completa en segundo plano (ads-imagenes).
+    try {
+      const uidImg = await getUserIdFromAuth(req);
+      const sbImg = uidImg ? getServiceClient() : null;
+      if (sbImg) {
+        // Un miembro guarda en la carpeta de SU dueño (donde la buscan todos).
+        let carpeta = uidImg;
+        try {
+          const { data } = await sbImg.from('cuenta_miembros').select('owner_id').eq('member_id', uidImg).maybeSingle();
+          if (data?.owner_id) carpeta = data.owner_id;
+        } catch { /* cuenta normal */ }
+        const limite = Date.now() + 120000;
+        const pendientes = scored.filter(a => a.id && a.imageUrls?.[0]);
+        for (let i = 0; i < pendientes.length && Date.now() < limite; i += 10) {
+          await Promise.all(pendientes.slice(i, i + 10).map(async (ad) => {
+            const u = await guardarImagenAd(sbImg, carpeta, ad.id, ad.imageUrls[0]);
+            if (u) ad.storedImageUrl = u;
+          }));
+        }
+      }
+    } catch (e) { console.warn('[apify-ingest] copia de imágenes:', e.message); }
 
     // SEARCH INDEX: si el cliente mandó productoId + competidorId + auth,
     // upsertear al index server-side para que la lupa rápida los encuentre.

@@ -974,6 +974,16 @@ export default function GaleriaReferencialesModal({ productoId, productoNombre, 
 
   const itemsRef = useRef(items);
   itemsRef.current = items;
+  // Re-firma ante imágenes rotas: como mucho una vez por minuto. Fuerza links
+  // NUEVOS (refresh normal conserva los anteriores para no re-bajar todo).
+  const forzarLinksNuevos = useRef(false);
+  const ultimoReFirmado = useRef(0);
+  const reFirmarSiHaceFalta = () => {
+    if (Date.now() - ultimoReFirmado.current < 60000) return;
+    ultimoReFirmado.current = Date.now();
+    forzarLinksNuevos.current = true;
+    refresh();
+  };
   const refresh = () => {
     // Esqueleto SOLO la primera vez: si ya hay imágenes en pantalla, se
     // actualiza en el lugar (no se borra toda la galería al generar).
@@ -990,7 +1000,10 @@ export default function GaleriaReferencialesModal({ productoId, productoNombre, 
       .then(([its, cs]) => {
         // Mismas URLs para los que ya estaban (si no, cada refresh firmaba
         // links nuevos y el navegador volvía a bajar TODAS las imágenes).
+        const forzar = forzarLinksNuevos.current;
+        forzarLinksNuevos.current = false;
         setItems(prev => {
+          if (forzar) return its;
           const previos = new Map((prev || []).map(p => [p.id, p]));
           return its.map(n => {
             const o = previos.get(n.id);
@@ -1654,8 +1667,10 @@ export default function GaleriaReferencialesModal({ productoId, productoNombre, 
           )}
         </div>
 
-        {/* Body */}
-        <div className="p-5 max-h-[75vh] overflow-y-auto">
+        {/* Body — si alguna imagen falla (links firmados vencidos tras 12 h
+            con la pestaña abierta), se piden links nuevos solos. */}
+        <div className="p-5 max-h-[75vh] overflow-y-auto"
+          onErrorCapture={e => { if (e.target?.tagName === 'IMG') reFirmarSiHaceFalta(); }}>
           {panel === 'reportes' ? (
             <WinnersReport
               winners={items.filter(it => it.winner)}

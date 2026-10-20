@@ -579,6 +579,9 @@ const EVENTOS = {
   // CyberMonday de Argentina NO es negro+neón (eso es Black Friday): tiene su
   // propio sistema visual (CACE) — ver CYBER_AR más abajo.
   cyber_monday: { label: 'CyberMonday',     kind: 'sale', recipientEs: null, recipientEn: null, estiloCyberAr: true },
+  pre_cyber:    { label: 'Pre-Cyber',        kind: 'sale', recipientEs: null, recipientEn: null, estiloCyberAr: true, etapa: 'pre' },
+  cyber_teaser: { label: 'Ya llega el Cyber', kind: 'sale', recipientEs: null, recipientEn: null, estiloCyberAr: true, etapa: 'teaser' },
+  cyber_week:   { label: 'Cyber Week',       kind: 'sale', recipientEs: null, recipientEn: null, estiloCyberAr: true, etapa: 'week' },
   black_friday: { label: 'BlackFriday',     kind: 'sale', recipientEs: null, recipientEn: null, dark: true },
 };
 
@@ -595,7 +598,7 @@ function resolveEvento(evento) {
     if (EVENTOS[key]) meta = EVENTOS[key];
     else { label = String(evento.label || '').slice(0, 60); kind = evento.kind === 'sale' ? 'sale' : evento.kind === 'gift' ? 'gift' : 'seasonal'; }
   } else return null;
-  if (meta) return { key, label: meta.label, kind: meta.kind, recipientEs: meta.recipientEs || null, recipientEn: meta.recipientEn || null, dark: !!meta.dark, estiloCyberAr: !!meta.estiloCyberAr };
+  if (meta) return { key, label: meta.label, kind: meta.kind, recipientEs: meta.recipientEs || null, recipientEn: meta.recipientEn || null, dark: !!meta.dark, estiloCyberAr: !!meta.estiloCyberAr, etapa: meta.etapa || 'oficial' };
   if (!label) return null;
   return { key, label, kind, recipientEs: null, recipientEn: null, dark: false };
 }
@@ -607,14 +610,56 @@ function resolveEvento(evento) {
 // noviembre (Cyber Week, extensión no oficial, 5 al 8).
 const CYBER_AR = {
   fechas: '2, 3 y 4 de noviembre',
-  visual: `ARGENTINE CYBERMONDAY STYLE (official event look, NOT Black Friday — do NOT use a black/dark-neon look): background in a vivid ELECTRIC VIOLET → ROYAL BLUE gradient, with CYAN and MAGENTA/PINK accent highlights (glows, light streaks, small sparkles, subtle tech/grid or cloud shapes). Typography: heavy, bold, ALL-CAPS, white, stacked ("CYBER / MONDAY") with slight italic/diagonal energy. Include the OFFICIAL EVENT SEAL as a SMALL badge in a top corner (max ~18% of the width): a tilted rounded TRIANGLE with a cyan-to-violet gradient fill and the white bold text "CYBER MONDAY" with ".COM.AR" underneath — render the text cleanly and spelled exactly. Add a date ribbon/pill reading "2, 3 y 4 de noviembre". The product (IMAGE 2) is the HERO, large and pixel-faithful, cut out over the gradient; the REAL offer goes in a big bold number badge (only the user's real offer, never invented). Keep it clean and premium like the best brand pieces of the event (Samsung, Motorola, Naldo): product big + offer big + seal small.`,
+  paleta: `ARGENTINE CYBER STYLE (NOT Black Friday — do NOT use a black/dark-neon look): background in a vivid ELECTRIC VIOLET → ROYAL BLUE gradient, with CYAN and MAGENTA/PINK accent highlights (glows, light streaks, small sparkles, subtle tech/grid or cloud shapes). Typography: heavy, bold, ALL-CAPS, white, stacked, with slight italic/diagonal energy. The product (IMAGE 2) is the HERO, large and pixel-faithful, cut out over the gradient. Keep it clean and premium like the best brand pieces of the event (Samsung, Motorola, Naldo): product big + message big + seal small.`,
+  selloOficial: 'the OFFICIAL EVENT SEAL as a SMALL badge in a top corner (max ~18% of the width): a tilted rounded TRIANGLE with a cyan-to-violet gradient fill and the white bold text "CYBER MONDAY" with ".COM.AR" underneath — render the text cleanly and spelled exactly',
 };
+// Las 4 etapas de la campaña Cyber (pedido 20/10). Misma paleta en todas.
+// `oficial` = lleva el sello OFICIAL de la CACE: solo el teaser (sin oferta) y
+// el evento (2 al 4/11) — las bases no permiten comunicar ofertas con la marca
+// del evento antes del inicio, y la Cyber Week es extensión de cada marca.
+// `oferta` = 'si' muestra la oferta real; 'no' es pura expectativa.
+const CYBER_ETAPAS = {
+  pre: {
+    oficial: false, oferta: 'si', cinta: 'PRECIO CYBER ANTICIPADO', sello: 'PRE-CYBER',
+    estrategia: 'PRE-CYBER / ADELANTO CYBER (antes del 2 de noviembre): la marca adelanta su precio Cyber. NO uses las palabras "CyberMonday" ni ".com.ar" en el creativo (sello propio "PRE-CYBER"). Mensajes: "Adelantate al Cyber", "Tu precio Cyber ya está activo", "No esperes al 2 de noviembre", "Comprá antes que todos". Lógica: el que ya decidió compra hoy, sin la locura del evento.',
+    angulos: '1) PRECIO CYBER YA ACTIVO: la oferta REAL gigante + "Adelantate al Cyber". 2) NO ESPERES: "¿Para qué esperar al 2 de noviembre?" — ventaja de comprar antes. 3) ANTES QUE SE AGOTE: escasez — "en el Cyber vuela, asegurá el tuyo hoy". 4) VALUE STACK ANTICIPADO: todo lo que se lleva + la promo real.',
+  },
+  teaser: {
+    oficial: true, oferta: 'no', cinta: 'YA LLEGA · 2, 3 Y 4 DE NOVIEMBRE', sello: null,
+    estrategia: 'YA LLEGA EL CYBER (teaser previo al 2 de noviembre): generar EXPECTATIVA sin mostrar ninguna oferta, porcentaje ni precio (las bases del evento no permiten anticipar ofertas con su marca). Mensajes: "Ya llega el CyberMonday", "Faltan pocos días", "Preparate", "Guardá este anuncio", "Se viene lo mejor del año para…" + beneficio real del producto.',
+    angulos: '1) CUENTA REGRESIVA: "faltan X días" con reloj/calendario, producto hero. 2) PREPARATE: "agendalo: 2, 3 y 4 de noviembre". 3) GUARDÁ ESTE ANUNCIO: llamado a guardar/activar recordatorio. 4) LO QUE SE VIENE: el beneficio real del producto como lo que no te podés perder (sin precio).',
+  },
+  oficial: { oficial: true, oferta: 'si', cinta: '2, 3 Y 4 DE NOVIEMBRE', sello: null, estrategia: null, angulos: null },
+  week: {
+    oficial: false, oferta: 'si', cinta: 'HASTA EL DOMINGO 8 DE NOVIEMBRE', sello: 'CYBER WEEK',
+    estrategia: 'CYBER WEEK (extensión de la marca, 5 al 8 de noviembre): segunda oportunidad para quien no compró en el CyberMonday. NO uses "CyberMonday" ni ".com.ar" (sello propio "CYBER WEEK"). Mensajes: "Extendimos el Cyber", "Si te lo perdiste, todavía estás a tiempo", "Última oportunidad de la semana", "Termina el domingo 8".',
+    angulos: '1) EXTENDIMOS: "Extendimos el Cyber" + la oferta REAL grande. 2) TE LO PERDISTE: "si no llegaste, todavía estás a tiempo". 3) ÚLTIMAS HORAS: countdown al domingo 8, urgencia máxima. 4) VALUE STACK: todo lo que se lleva + la promo real.',
+  },
+};
+function cyberEtapa(ev) { return CYBER_ETAPAS[ev?.etapa || 'oficial'] || CYBER_ETAPAS.oficial; }
+function cyberVisual(ev) {
+  const et = cyberEtapa(ev);
+  const sello = et.oficial
+    ? `Include ${CYBER_AR.selloOficial}.`
+    : `Include a SMALL own badge in a top corner in the same style (tilted rounded triangle, cyan-to-violet gradient) reading exactly "${et.sello}". Do NOT write "CYBER MONDAY" nor ".COM.AR" anywhere.`;
+  const oferta = et.oferta === 'si'
+    ? "The REAL offer goes in a big bold number badge (only the user's real offer, never invented)."
+    : 'Do NOT show ANY price, percentage, discount or offer — this piece builds anticipation only.';
+  return `${CYBER_AR.paleta} ${sello} Add a ribbon/pill reading exactly "${et.cinta}". ${oferta}`;
+}
 
 // Directiva para el STRATEGIST (español, alta prioridad).
 function eventoStrategyDirective(ev) {
   if (!ev) return '';
+  if (ev.estiloCyberAr && cyberEtapa(ev).estrategia) {
+    const et = cyberEtapa(ev);
+    const oferta = et.oferta === 'si'
+      ? 'Usá SOLO las ofertas/precios reales del usuario (más abajo); NO inventes porcentajes ni precios. Si no hay oferta cargada, urgencia sin número.'
+      : 'PROHIBIDO mostrar ofertas, porcentajes o precios en esta pieza: es pura expectativa.';
+    return `**EVENTO / FECHA (CRÍTICO): ${ev.label}** — ${et.estrategia} Mantené el beneficio real del producto y el DOMAIN LOCK. ${oferta}`;
+  }
   if (ev.estiloCyberAr) {
-    return `**EVENTO / FECHA (CRÍTICO): CyberMonday Argentina — ${CYBER_AR.fechas}**. La marca participa OFICIALMENTE (puede llevar el sello CyberMonday.com.ar). Reangulá hacia URGENCIA + OFERTA del evento: ahorro, tiempo limitado (72 hs), escasez, manteniendo el beneficio real del producto y el DOMAIN LOCK. NO inventes porcentajes ni precios: usá SOLO las ofertas/precios reales del usuario (más abajo); si no hay, urgencia sin número ("Solo por CyberMonday", "Solo 72 horas"). Los headlines pueden usar el vocabulario del evento en Argentina: "YA LLEGA", "EMPEZÓ EL CYBER", "ÚLTIMO DÍA", "SOLO POR 72 HS", y mencionar las fechas ${CYBER_AR.fechas} cuando sume. Cuotas sin interés o envío gratis SOLO si están en las ofertas reales.`;
+    return `**EVENTO / FECHA (CRÍTICO): CyberMonday Argentina — ${CYBER_AR.fechas}**. La marca participa OFICIALMENTE (puede llevar el sello CyberMonday.com.ar). Reangulá hacia URGENCIA + OFERTA del evento: ahorro, tiempo limitado (72 hs), escasez, manteniendo el beneficio real del producto y el DOMAIN LOCK. NO inventes porcentajes ni precios: usá SOLO las ofertas/precios reales del usuario (más abajo); si no hay, urgencia sin número ("Solo por CyberMonday", "Solo 72 horas"). Los headlines pueden usar el vocabulario del evento en Argentina: "EMPEZÓ EL CYBER", "YA ES CYBER", "ÚLTIMO DÍA", "SOLO POR 72 HS" (NO uses "ya llega" ni "preparate": esta pieza sale DURANTE el evento), y mencionar las fechas ${CYBER_AR.fechas} cuando sume. Cuotas sin interés o envío gratis SOLO si están en las ofertas reales.`;
   }
   if (ev.kind === 'gift') {
     return `**EVENTO / FECHA (CRÍTICO): ${ev.label}**. Este creativo es para la campaña de ${ev.label}. Reangulá TODO el mensaje para posicionar el producto como el REGALO ideal para ${ev.recipientEs || 'un ser querido'} en ${ev.label}, SIN perder los pain points y beneficios reales del producto (son la razón por la que el regalo vale la pena). Conectá el beneficio del producto con lo que esa persona valora/necesita (ej.: un producto de autocuidado para Día de la Madre → "regalale a mamá el descanso que se merece"). Los headlines/claims deben mencionar la ocasión ("Regalá en ${ev.label}", "El regalo perfecto para ${ev.recipientEs || 'quien querés'}") ADEMÁS del beneficio real. Mantené el DOMAIN LOCK: el problema/beneficio sigue siendo el del producto, nunca el del ad de referencia.`;
@@ -631,8 +676,10 @@ function eventoStrategyDirective(ev) {
 // variation y el prompt de imagen se lo aplica a ESA variación puntual.
 function eventoAnglesRule(ev) {
   if (!ev) return '';
-  const angulos = ev.estiloCyberAr
-    ? `1) OFERTA HERO: la promo REAL gigante + el producto + sello CyberMonday y cinta "${CYBER_AR.fechas}". 2) YA LLEGA / PRE-LANZAMIENTO: "Ya llega el CyberMonday" con la fecha, anticipación (para pautar antes del 2/11). 3) ÚLTIMO DÍA / 72 HS: countdown, "termina hoy", urgencia máxima. 4) VALUE STACK: todo lo que se lleva (combo/beneficios apilados + cuotas/envío si son reales) con la promo.`
+  const angulos = (ev.estiloCyberAr && cyberEtapa(ev).angulos)
+    ? cyberEtapa(ev).angulos
+    : ev.estiloCyberAr
+    ? `1) OFERTA HERO: la promo REAL gigante + el producto + sello CyberMonday y cinta "${CYBER_AR.fechas}". 2) EMPEZÓ EL CYBER: "Empezó el CyberMonday" / "Ya es Cyber" — el evento está activo, comprá ahora (el "ya llega" previo es la etapa aparte "Ya llega el Cyber", SIN oferta). 3) ÚLTIMO DÍA / 72 HS: countdown, "termina hoy", urgencia máxima. 4) VALUE STACK: todo lo que se lleva (combo/beneficios apilados + cuotas/envío si son reales) con la promo.`
     : ev.kind === 'sale'
     ? `1) OFERTA HERO: la promo REAL como protagonista absoluto (tipografía gigante, el producto al lado). 2) URGENCIA/COUNTDOWN: "termina ${ev.label}" / stock limitado — reloj, barra de stock, deadline. 3) VALUE STACK: todo lo que se lleva (bundle/beneficios apilados) + la promo. 4) SOCIAL PROOF + ESCASEZ: "miles ya lo aprovecharon" + quedan pocos.`
     : `1) REGALO EMOCIONAL: el producto como el regalo que ${ev.recipientEs || 'esa persona'} se merece — escena cálida, overlay emocional. 2) URGENCIA DE FECHA/ENVÍO: "pedilo antes y llega para ${ev.label}" — paquete/regalo listo, deadline de envío. 3) OFERTA DE REGALO: el bundle/promo REAL como "regalo resuelto" (overlay de la oferta, nunca inventada). 4) SOCIAL PROOF TEMATIZADO: testimonio de alguien que lo regaló ("se lo regalé a ${ev.recipientEs || 'mi vieja'} y no para de usarlo") en estilo reseña.`;
@@ -643,8 +690,11 @@ function eventoAnglesRule(ev) {
 // Directiva VISUAL para el prompt de imagen (inglés, como el resto del prompt).
 function eventoVisualDirective(ev) {
   if (!ev) return '';
+  if (ev.estiloCyberAr && cyberEtapa(ev).oferta === 'no') {
+    return `EVENT CAMPAIGN — ${ev.label} (teaser, no offer). ${cyberVisual(ev)} This event style OVERRIDES any palette coming from the reference ad or from a rebrand/accent color (the product colors stay only on the product itself).`;
+  }
   if (ev.estiloCyberAr) {
-    return `EVENT CAMPAIGN — CyberMonday Argentina (sale). ${CYBER_AR.visual} This event style OVERRIDES any palette coming from the reference ad or from a rebrand/accent color (the product colors stay only on the product itself). CRITICAL: render ONLY the user's real offer/price in any badge — NEVER invent a % or a price; if no real offer is provided, use urgency wording only ("Solo por CyberMonday", "Solo 72 horas") with NO fake number.`;
+    return `EVENT CAMPAIGN — ${ev.label} (sale). ${cyberVisual(ev)} This event style OVERRIDES any palette coming from the reference ad or from a rebrand/accent color (the product colors stay only on the product itself). CRITICAL: render ONLY the user's real offer/price in any badge — NEVER invent a % or a price; if no real offer is provided, use urgency wording only ("Solo por CyberMonday", "Solo 72 horas") with NO fake number.`;
   }
   if (ev.kind === 'gift') {
     return `EVENT CAMPAIGN — ${ev.label} (gifting): Theme the whole scene for ${ev.label}. Add TASTEFUL gift cues as SECONDARY props around the product — a wrapped gift box, a satin ribbon/bow, a small greeting card, soft celebratory elements — plus a warm, emotional, premium palette fitting ${ev.label}.${ev.recipientEn ? ` You may naturally include ${ev.recipientEn} in the scene if it fits.` : ''} CRITICAL: the product (IMAGE 2) stays pixel-faithful and remains the HERO — do NOT gift-wrap, cover or hide it; the gift cues never alter product fidelity. Text overlays may carry a small "${ev.label}" tag/ribbon, but any offer/price/claim must come ONLY from the user's real offers.`;
@@ -1400,7 +1450,9 @@ function buildPromptFromPlan({ producto, inspiracion, plan, variation, accentCol
   // excepción explícita a la regla de FIDELITY de arriba.
   if (evento?.estiloCyberAr) {
     parts.push('');
-    parts.push(`FINAL EVENT LOCK — CyberMonday Argentina: the electric violet → blue gradient with cyan/magenta accents MUST be the background palette, overriding any palette listed above (reference or rebrand). EXCEPTION to the FIDELITY rule: you MUST add the small official "CYBER MONDAY .COM.AR" triangle seal in a top corner and the "${CYBER_AR.fechas}" date ribbon, even if not listed above. Spell both exactly.`);
+    const et = cyberEtapa(evento);
+    const selloTxt = et.oficial ? 'the small official "CYBER MONDAY .COM.AR" triangle seal' : `the small own "${et.sello}" triangle badge (NO "CYBER MONDAY" / ".COM.AR" text anywhere)`;
+    parts.push(`FINAL EVENT LOCK — ${evento.label}: the electric violet → blue gradient with cyan/magenta accents MUST be the background palette, overriding any palette listed above (reference or rebrand). EXCEPTION to the FIDELITY rule: you MUST add ${selloTxt} in a top corner and the "${et.cinta}" ribbon, even if not listed above. Spell both exactly.${et.oferta === 'no' ? ' Show NO price, percentage or offer at all, even if listed above.' : ''} PEOPLE (if any): they must look like a REAL, unretouched photograph (follow HUMAN PHOTOREALISM) — keep their skin tones and lighting NATURAL and neutral, as a real photo of a real person; do NOT tint skin violet/blue/magenta nor add neon glow on them. The Cyber gradient and glows live in the background and graphic elements, not on the person.`);
   }
 
   return parts.join('\n');
@@ -1591,7 +1643,9 @@ function buildPrompt({ producto, inspiracion, skeleton, accentColor, aspectRatio
   // excepción explícita a la regla de FIDELITY de arriba.
   if (evento?.estiloCyberAr) {
     parts.push('');
-    parts.push(`FINAL EVENT LOCK — CyberMonday Argentina: the electric violet → blue gradient with cyan/magenta accents MUST be the background palette, overriding any palette listed above (reference or rebrand). EXCEPTION to the FIDELITY rule: you MUST add the small official "CYBER MONDAY .COM.AR" triangle seal in a top corner and the "${CYBER_AR.fechas}" date ribbon, even if not listed above. Spell both exactly.`);
+    const et = cyberEtapa(evento);
+    const selloTxt = et.oficial ? 'the small official "CYBER MONDAY .COM.AR" triangle seal' : `the small own "${et.sello}" triangle badge (NO "CYBER MONDAY" / ".COM.AR" text anywhere)`;
+    parts.push(`FINAL EVENT LOCK — ${evento.label}: the electric violet → blue gradient with cyan/magenta accents MUST be the background palette, overriding any palette listed above (reference or rebrand). EXCEPTION to the FIDELITY rule: you MUST add ${selloTxt} in a top corner and the "${et.cinta}" ribbon, even if not listed above. Spell both exactly.${et.oferta === 'no' ? ' Show NO price, percentage or offer at all, even if listed above.' : ''} PEOPLE (if any): they must look like a REAL, unretouched photograph (follow HUMAN PHOTOREALISM) — keep their skin tones and lighting NATURAL and neutral, as a real photo of a real person; do NOT tint skin violet/blue/magenta nor add neon glow on them. The Cyber gradient and glows live in the background and graphic elements, not on the person.`);
   }
 
   return parts.join('\n');

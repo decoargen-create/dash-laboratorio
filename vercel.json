@@ -28,6 +28,7 @@
     "api/marketing/resolve-fb-page.js": { "maxDuration": 30 },
     "api/marketing/proxy-image.js": { "maxDuration": 30 },
     "api/marketing/creativos-thumbs.js": { "maxDuration": 60 },
+    "api/marketing/ads-imagenes.js": { "maxDuration": 60 },
     "api/marketing/ocr-ad.js": { "maxDuration": 180 },
     "api/marketing/transcribe-ad.js": { "maxDuration": 240 },
     "api/marketing/referencias.js": { "maxDuration": 300 },

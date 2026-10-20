@@ -37,6 +37,7 @@ import { friendlyAIError } from './aiError.js';
 import { saveReferencial, getUsedAdIdsForProducto } from './galeriaReferenciales.js';
 import { startBulk, patchBulk, reportAdFinished, finishBulk, clearBulk, subscribeBulk } from './bulkProgressStore.js';
 import { withGenSlot, TARGET_INFLIGHT } from './genConcurrency.js';
+import { urlImagenGuardada, pedirGuardarImagenAd } from './adImagenes.js';
 import { EVENTOS_FECHA } from './eventosFecha.js';
 import BulkConfirmModal from './BulkConfirmModal.jsx';
 import { cacheAdImagesBatch, getCachedAdImageUrl, getCachedAdImageDataUrl } from './adImagesStore.js';
@@ -744,14 +745,23 @@ function BrandCard({ brand, ads, isScraping, adaptingAdIds, creandoAdIds, selecc
 // (fetch server-side, sin referrer del browser). Si el proxy TAMBIÉN falla
 // (URL genuinamente expirada), recién ahí escondemos. Sin esto las miniaturas
 // de ads viejos/inactivos salían todas negras.
+// Orden de fuentes: copia guardada (no vence) → CDN de Meta → proxy → nada.
 function handleAdImgError(e, cdnUrl) {
   const img = e.currentTarget;
-  if (!img.dataset.proxied && cdnUrl) {
-    img.dataset.proxied = '1';
+  if (img.dataset.guardada === '1' && !img.dataset.step && cdnUrl) {
+    img.dataset.step = 'cdn';
+    img.src = cdnUrl;
+  } else if (img.dataset.step !== 'proxy' && cdnUrl) {
+    img.dataset.step = 'proxy';
     img.src = `/api/marketing/proxy-image?url=${encodeURIComponent(cdnUrl)}`;
   } else {
     img.style.display = 'none';
   }
+}
+// Si se vio desde Meta (no desde la copia), se manda a guardar la copia.
+function handleAdImgLoad(e, adId, cdnUrl) {
+  const img = e.currentTarget;
+  if (img.dataset.guardada !== '1' || img.dataset.step) pedirGuardarImagenAd(adId, cdnUrl);
 }
 
 function AdThumb({ ad, brandNombre, brandId = null, isCompetidor = false, fresh = false, adapting = false, creando = false, selected = false, selectionIndex = null, used = false, onAdapt, onCrearReferencial, onToggleSelect, onSaveToBoard = null, progress = null, onClearProgress = null }) {
@@ -801,7 +811,8 @@ function AdThumb({ ad, brandNombre, brandId = null, isCompetidor = false, fresh 
       window.removeEventListener('viora:ad-image-cached', onSaved);
     };
   }, [ad?.id]);
-  const thumb = cachedUrl || cdnThumb;
+  const guardada = cachedUrl ? null : (ad.storedImageUrl || urlImagenGuardada(ad.id));
+  const thumb = cachedUrl || guardada || cdnThumb;
   return (
     <div
       ref={containerRef}
@@ -824,9 +835,10 @@ function AdThumb({ ad, brandNombre, brandId = null, isCompetidor = false, fresh 
       title={ad.body?.slice(0, 200) || ad.headline || ''}
     >
       {thumb ? (
-        <img src={thumb} alt="" className="w-full h-full object-cover"
-          loading="lazy" decoding="async"
-          onError={(e) => handleAdImgError(e, cachedUrl ? cdnThumb : thumb)} />
+        <img key={thumb} src={thumb} alt="" className="w-full h-full object-cover"
+          loading="lazy" decoding="async" data-guardada={guardada ? '1' : undefined}
+          onLoad={(e) => { if (!cachedUrl && cdnThumb) handleAdImgLoad(e, ad.id, cdnThumb); }}
+          onError={(e) => handleAdImgError(e, cdnThumb)} />
       ) : (
         <div className="w-full h-full flex items-center justify-center">
           <ImageIcon size={20} className="text-gray-300" />

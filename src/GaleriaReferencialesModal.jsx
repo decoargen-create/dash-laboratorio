@@ -31,6 +31,7 @@ import { BarChart3 } from 'lucide-react';
 import { SkeletonGrid } from './Skeleton.jsx';
 import EmptyState from './EmptyState.jsx';
 import { getCachedCreativoUrl } from './creativoImgCache.js';
+import { supabase } from './supabase.js';
 
 function fmtDate(iso) {
   if (!iso) return '';
@@ -63,7 +64,6 @@ function base64ToBlob(b64, mimeType = 'image/png') {
 // más" / al scrollear → así no se bajan cientos de imágenes al abrir la galería.
 // 12 (y no más) para acotar cuántos full-res se decodifican a la vez en la
 // primera pasada (antes de que existan las miniaturas) y no reventar la RAM.
-const PAGE_SIZE = 12;
 
 // Cuántos creativos entran en cada ZIP de la descarga masiva. Bajar y zipear
 // MUCHAS imágenes full-res de una llena la RAM y crashea Chrome (OOM); por eso
@@ -72,70 +72,74 @@ const PAGE_SIZE = 12;
 const ZIP_CHUNK = 15;
 
 function useBlobUrls(items) {
-  const [map, setMap] = useState(() => new Map());
+  // INCREMENTAL (pedido 20/10: "cargar más tarda una infinidad" y "al generar
+  // me refresca toda la galería"): las URLs ya resueltas se conservan entre
+  // renders por id; solo se procesan los items NUEVOS y se liberan los que ya
+  // no están. Antes se rehacía TODO en cada cambio (revocando y volviendo a
+  // bajar cada imagen).
+  const cacheRef = useRef(new Map()); // id → { url, blob: bool }
+  const [, setTick] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
-    const createdUrls = [];   // objectURLs creados acá → revocar al cleanup
-    const next = new Map();
-
-    // 1. Pintado SÍNCRONO: base64 legacy → blob URL; cloud → signed URL directa
-    //    (fallback inmediato). Se renderiza ya, sin esperar al cache.
-    for (const it of items) {
-      if (it?.imageBase64) {
-        try {
-          const blob = base64ToBlob(it.imageBase64, it.mimeType || 'image/png');
-          const u = URL.createObjectURL(blob);
-          createdUrls.push(u);
-          next.set(it.id, u);
-        } catch {
-          if (it.imageUrl) next.set(it.id, it.imageUrl);
-        }
-      } else if (it?.thumbUrl || it?.imageUrl) {
-        // Miniatura si existe (liviana); si no, el full como fallback inmediato.
-        next.set(it.id, it.thumbUrl || it.imageUrl);
+    const cache = cacheRef.current;
+    const vivos = new Set(items.map(it => it?.id));
+    // Liberar los que ya no están en la lista.
+    for (const [id, v] of cache) {
+      if (!vivos.has(id)) {
+        if (v.blob) { try { URL.revokeObjectURL(v.url); } catch {} }
+        cache.delete(id);
       }
     }
-    setMap(new Map(next));
-
-    // 2. Resolución ASÍNCRONA del cache para items cloud: si la imagen ya está
-    //    en IndexedDB la servimos local (0 egress); si no, se baja una vez y se
-    //    cachea. Reemplaza el fallback directo cuando el blob está listo.
-    const cloudItems = items.filter(it => it?.storagePath && it?.imageUrl && !it?.imageBase64);
-    if (cloudItems.length) {
+    let cambio = false;
+    const pendientesThumb = [];
+    for (const it of items) {
+      if (!it?.id) continue;
+      const src = it.thumbUrl || it.imageUrl;
+      const previo = cache.get(it.id);
+      // Ya resuelto con la MISMA fuente → nada que hacer. Si llegó una
+      // miniatura nueva (backfill), se reemplaza la imagen pesada por ella.
+      if (previo && (previo.src === src || it.imageBase64)) continue;
+      if (previo?.blob) { try { URL.revokeObjectURL(previo.url); } catch {} }
+      cambio = true;
+      if (it.imageBase64) {
+        try {
+          const u = URL.createObjectURL(base64ToBlob(it.imageBase64, it.mimeType || 'image/png'));
+          cache.set(it.id, { url: u, blob: true, src });
+        } catch { if (it.imageUrl) cache.set(it.id, { url: it.imageUrl, blob: false, src }); }
+      } else if (it.thumbUrl || it.imageUrl) {
+        // URL firmada directa: el <img loading="lazy"> la baja recién cuando
+        // aparece en pantalla y el navegador la cachea. Solo las MINIATURAS
+        // (livianas) pasan además por el caché local; el full-res ya no se
+        // baja entero a memoria (con 100+ creativos eso trababa todo).
+        cache.set(it.id, { url: src, blob: false, src });
+        if (it.thumbPath && it.thumbUrl) pendientesThumb.push(it);
+      }
+    }
+    if (cambio) setTick(t => t + 1);
+    if (pendientesThumb.length) {
       (async () => {
-        const results = await Promise.all(cloudItems.map(async (it) => {
+        for (const it of pendientesThumb) {
+          if (cancelled) return;
           try {
-            // Miniatura propia (la generamos nosotros → JPEG válido, no rompe).
-            if (it.thumbPath && it.thumbUrl) {
-              const turl = await getCachedCreativoUrl(it.thumbPath, it.thumbUrl);
-              if (turl) return [it.id, turl];
-            }
-            // Full-res (base). Las miniaturas ya NO se generan on-the-fly acá
-            // (decodificar el full-res spikeaba la RAM y crasheaba Chrome). Los
-            // creativos NUEVOS ya salen con miniatura al guardarse.
-            const url = await getCachedCreativoUrl(it.storagePath, it.imageUrl);
-            return url ? [it.id, url] : null;
-          } catch { return null; }
-        }));
-        if (cancelled) {
-          results.forEach(r => { if (r) { try { URL.revokeObjectURL(r[1]); } catch {} } });
-          return;
+            const u = await getCachedCreativoUrl(it.thumbPath, it.thumbUrl);
+            if (u && !cancelled && cache.has(it.id)) { cache.set(it.id, { url: u, blob: true, src: it.thumbUrl }); setTick(t => t + 1); }
+            else if (u) { try { URL.revokeObjectURL(u); } catch {} }
+          } catch { /* queda la URL firmada */ }
         }
-        let changed = false;
-        for (const r of results) {
-          if (r) { next.set(r[0], r[1]); createdUrls.push(r[1]); changed = true; }
-        }
-        if (changed) setMap(new Map(next));
       })();
     }
-
-    return () => {
-      cancelled = true;
-      for (const u of createdUrls) { try { URL.revokeObjectURL(u); } catch {} }
-    };
+    return () => { cancelled = true; };
   }, [items]);
 
+  // Al desmontar, liberar todo.
+  useEffect(() => () => {
+    for (const v of cacheRef.current.values()) if (v.blob) { try { URL.revokeObjectURL(v.url); } catch {} }
+    cacheRef.current.clear();
+  }, []);
+
+  const map = new Map();
+  for (const [id, v] of cacheRef.current) map.set(id, v.url);
   return map;
 }
 
@@ -922,7 +926,6 @@ export default function GaleriaReferencialesModal({ productoId, productoNombre, 
   // ⚠️ visibleItems TIENE que estar acá arriba (antes del useEffect de
   // keyboard nav que lo usa en su dep array). Estaba abajo en línea 935
   // y producía TDZ "Cannot access 'N' before initialization" en prod.
-  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
   const visibleItems = useMemo(() => items.filter(it => {
     if (panel === 'winners' && !it.winner) return false;
     if (panel === 'archivados' && !it.archivado) return false;
@@ -955,8 +958,9 @@ export default function GaleriaReferencialesModal({ productoId, productoNombre, 
   // MEMOIZADO: sin esto, `shownItems` era un array nuevo en cada render y hacía
   // que useBlobUrls corriera en loop (setState → render → nuevo array → …),
   // dejando la pestaña recalculando sin parar ("página pesada / no responde").
-  const shownItems = useMemo(() => visibleItems.slice(0, visibleCount), [visibleItems, visibleCount]);
-  useEffect(() => { setVisibleCount(PAGE_SIZE); }, [panel, filtroEstado, filtroVariante, filtroOrigen, searchQuery, items]);
+  // Se muestran TODAS de una (pedido 20/10): cada <img> es lazy y baja recién
+  // cuando entra en pantalla, así que no hace falta paginar.
+  const shownItems = visibleItems;
 
   // Al abrir un creativo, si no trae prompt/skeleton (lista liviana), los pedimos
   // para el panel "cómo se generó". Items de IDB ya los traen → no pide nada.
@@ -968,8 +972,12 @@ export default function GaleriaReferencialesModal({ productoId, productoNombre, 
     return () => { alive = false; };
   }, [selected]);
 
+  const itemsRef = useRef(items);
+  itemsRef.current = items;
   const refresh = () => {
-    setCargando(true);
+    // Esqueleto SOLO la primera vez: si ya hay imágenes en pantalla, se
+    // actualiza en el lugar (no se borra toda la galería al generar).
+    if (!itemsRef.current?.length) setCargando(true);
     // Cuando el panel es "archivados", incluimos archivados en la query
     // — sino los filtraríamos del array y no aparecerían en el panel.
     // 'reportes' incluye archivados también porque los winners pueden estar
@@ -979,7 +987,18 @@ export default function GaleriaReferencialesModal({ productoId, productoNombre, 
       getReferencialesByProducto(productoId, { includeArchived }),
       countReferencialesByProducto(productoId),
     ])
-      .then(([its, cs]) => { setItems(its); setCounts(cs); })
+      .then(([its, cs]) => {
+        // Mismas URLs para los que ya estaban (si no, cada refresh firmaba
+        // links nuevos y el navegador volvía a bajar TODAS las imágenes).
+        setItems(prev => {
+          const previos = new Map((prev || []).map(p => [p.id, p]));
+          return its.map(n => {
+            const o = previos.get(n.id);
+            return o ? { ...n, imageUrl: o.imageUrl || n.imageUrl, thumbUrl: o.thumbUrl || n.thumbUrl } : n;
+          });
+        });
+        setCounts(cs);
+      })
       .finally(() => setCargando(false));
   };
 
@@ -994,6 +1013,42 @@ export default function GaleriaReferencialesModal({ productoId, productoNombre, 
     return () => window.removeEventListener('viora:referencial-saved', onSaved);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [productoId, verArchivados, panel]);
+
+  // BACKFILL DE MINIATURAS: los creativos viejos no tienen thumb y la grilla
+  // bajaba el PNG original (~1,5 MB c/u). En segundo plano, de a 12 y en el
+  // orden de la galería, el server genera las miniaturas que faltan; cada una
+  // reemplaza a su imagen pesada apenas está lista. Una vez hechas quedan
+  // guardadas para siempre.
+  const thumbsPedidos = useRef(new Set());
+  useEffect(() => {
+    const faltan = items.filter(it => it?.storagePath && !it.thumbPath && !thumbsPedidos.current.has(it.id));
+    if (!faltan.length || !supabase) return;
+    let vivo = true;
+    faltan.forEach(it => thumbsPedidos.current.add(it.id));
+    (async () => {
+      for (let i = 0; i < faltan.length && vivo; i += 12) {
+        const lote = faltan.slice(i, i + 12);
+        try {
+          const r = await fetch('/api/marketing/creativos-thumbs', {
+            method: 'POST', headers: await authHeaders(),
+            body: JSON.stringify({ ids: lote.map(x => x.id) }),
+          });
+          const d = await r.json().catch(() => ({}));
+          const thumbs = d.thumbs || {};
+          const paths = Object.values(thumbs);
+          if (!paths.length || !vivo) continue;
+          const { data: firmadas } = await supabase.storage.from('creativos').createSignedUrls(paths, 43200);
+          const porPath = new Map((firmadas || []).map(x => [x.path, x.signedUrl]));
+          setItems(prev => prev.map(it => {
+            const tp = thumbs[it.id];
+            const tu = tp && porPath.get(tp);
+            return tu ? { ...it, thumbPath: tp, thumbUrl: tu } : it;
+          }));
+        } catch { /* se reintenta la próxima vez que se abra la galería */ }
+      }
+    })();
+    return () => { vivo = false; };
+  }, [items]);
 
   // Blob URLs por item — se revoca el set anterior al regenerar.
   // SIN esto, cada <img src="data:..."> hacía Chrome decodificar PNG 2K en
@@ -1650,16 +1705,6 @@ export default function GaleriaReferencialesModal({ productoId, productoNombre, 
             <GalleryTableView items={shownItems} blobUrls={blobUrls} seleccionados={seleccionados} selectedOrder={selectedOrder}
               onToggleSelect={toggleSeleccion} onOpen={setSelected}
               onDownload={handleSingleDownload} onToggleDescargada={toggleDescargadaFlag} onArchive={handleArchive} onDelete={handleDelete} onToggleWinner={handleToggleWinner} />
-          )}
-          {/* Cargar más — el resto de los creativos se muestran de a PAGE_SIZE.
-              Solo cuando hay una vista de grilla/lista/tabla y quedan items. */}
-          {!cargando && panel !== 'reportes' && shownItems.length < visibleItems.length && (
-            <div className="flex justify-center py-5">
-              <button onClick={() => setVisibleCount(c => c + PAGE_SIZE)}
-                className="px-4 py-2 text-sm font-bold text-brand-600 dark:text-brand-300 border border-brand-300 dark:border-brand-700 rounded-lg hover:bg-brand-50 dark:hover:bg-brand-900/20 transition">
-                Cargar más · {visibleItems.length - shownItems.length} restantes
-              </button>
-            </div>
           )}
         </div>
 

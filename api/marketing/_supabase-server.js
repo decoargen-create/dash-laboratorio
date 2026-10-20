@@ -299,7 +299,26 @@ export async function uploadCreativoToBucket(userId, refId, base64, mimeType = '
   });
   if (error) throw new Error(`Storage upload: ${error.message}`);
   const { data: { publicUrl } } = supabase.storage.from('creativos').getPublicUrl(path);
-  return { storagePath: path, imageUrl: publicUrl };
+  // Miniatura JPEG liviana para la grilla (best-effort): sin esto la galería
+  // bajaba el PNG original (~1,5 MB) por cada cuadradito.
+  const thumbPath = await subirThumbCreativo(supabase, path, buf);
+  return { storagePath: path, imageUrl: publicUrl, thumbPath };
+}
+
+// Genera y sube la miniatura (…/<id>_thumb.jpg, 480px, ~40 KB) de un
+// creativo. Devuelve el thumbPath o null si algo falla (nunca rompe el save).
+export async function subirThumbCreativo(supabase, storagePath, buf) {
+  try {
+    const { default: sharp } = await import('sharp');
+    const thumb = await sharp(buf).resize({ width: 480, height: 480, fit: 'inside', withoutEnlargement: true })
+      .jpeg({ quality: 72, mozjpeg: true }).toBuffer();
+    const tPath = String(storagePath).replace(/\.[a-z0-9]+$/i, '') + '_thumb.jpg';
+    const { error } = await supabase.storage.from('creativos').upload(tPath, thumb, { contentType: 'image/jpeg', upsert: true });
+    return error ? null : tPath;
+  } catch (e) {
+    console.warn('[thumb] no se pudo generar:', e.message);
+    return null;
+  }
 }
 
 // Genera signed URLs (1h por default) para una lista de storage paths del

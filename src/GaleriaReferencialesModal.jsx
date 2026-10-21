@@ -593,6 +593,72 @@ function GalleryTableView({ items, blobUrls, seleccionados, selectedOrder, onTog
 
 // Lightbox separado para mantener este archivo manejable.
 
+// Carga del creativo en alta (prototipo F+D elegido): mientras baja el
+// original, la miniatura se muestra PIXELADA y se va definiendo por pasos, con
+// el ícono de AdsLab latiendo y frases que rotan. Al terminar, el original
+// aparece nítido con un fundido.
+const FRASES_CARGA = ['Trayendo tu creativo…', 'Ajustando colores…', 'Revisando detalles…', 'Casi listo…'];
+const PASOS_PIXEL = [8, 14, 24, 40, 72];
+function ImagenEnAlta({ src, fallback, size, onImgError }) {
+  const [cargada, setCargada] = useState(false);
+  const [paso, setPaso] = useState(0);
+  const [frase, setFrase] = useState(0);
+  const [srcActual, setSrcActual] = useState(src);
+  const canvasRef = useRef(null);
+  const thumbRef = useRef(null);
+  const [w, h] = String(size || '1024x1024').split('x').map(Number);
+  const aspect = w && h ? `${w} / ${h}` : '1 / 1';
+
+  // Frases y pasos de pixelado mientras no cargó.
+  useEffect(() => {
+    if (cargada) return;
+    const tf = setInterval(() => setFrase(i => (i + 1) % FRASES_CARGA.length), 1100);
+    const tp = setInterval(() => setPaso(p => Math.min(PASOS_PIXEL.length - 1, p + 1)), 650);
+    return () => { clearInterval(tf); clearInterval(tp); };
+  }, [cargada]);
+
+  // Miniatura → canvas chiquito escalado sin suavizado = pixelado.
+  useEffect(() => {
+    if (!fallback || fallback === src) return;
+    const im = new Image();
+    im.onload = () => { thumbRef.current = im; dibujar(); };
+    im.src = fallback;
+  }, [fallback, src]); // eslint-disable-line react-hooks/exhaustive-deps
+  const dibujar = () => {
+    const cv = canvasRef.current, im = thumbRef.current;
+    if (!cv || !im) return;
+    const n = PASOS_PIXEL[paso];
+    const ratio = (h && w) ? h / w : 1;
+    cv.width = n; cv.height = Math.max(1, Math.round(n * ratio));
+    const c = cv.getContext('2d');
+    c.imageSmoothingEnabled = false;
+    c.drawImage(im, 0, 0, cv.width, cv.height);
+  };
+  useEffect(() => { dibujar(); }, [paso]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  return (
+    <div className="relative w-full rounded overflow-hidden bg-gray-900" style={{ aspectRatio: aspect, maxHeight: '60vh' }}>
+      {!cargada && (
+        <canvas ref={canvasRef} className="absolute inset-0 w-full h-full"
+          style={{ imageRendering: 'pixelated', opacity: thumbRef.current || fallback ? 1 : 0 }} />
+      )}
+      <img src={srcActual} alt=""
+        onLoad={() => setCargada(true)}
+        onError={() => {
+          if (fallback && srcActual !== fallback) setSrcActual(fallback);
+          onImgError?.();
+        }}
+        className={`absolute inset-0 w-full h-full object-contain bg-white transition-opacity duration-500 ${cargada ? 'opacity-100' : 'opacity-0'}`} />
+      {!cargada && (
+        <div className="absolute inset-0 flex flex-col items-center justify-center gap-2.5 pointer-events-none">
+          <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-brand-500 to-sky-400 flex items-center justify-center text-white font-black text-sm shadow-lg animate-pulse ring-4 ring-brand-500/30">AL</div>
+          <span className="px-3 py-1 rounded-full bg-gray-950/70 backdrop-blur text-white text-xs font-semibold">{FRASES_CARGA[frase]}</span>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function Lightbox({ item, imgSrc, imgFallback = '', onImgError = null, onClose, showDebug, setShowDebug, onDownload, onDelete, onToggleDescargada, onArchive, onToggleWinner, onIterateWinner, iterating = false, onRegenerar, regenerating = false }) {
   const metrics = item.winnerMetrics || {};
   // Panel "Regenerar / Corregir": se abre con el botón y toma una instrucción
@@ -645,13 +711,7 @@ function Lightbox({ item, imgSrc, imgFallback = '', onImgError = null, onClose, 
                 </span>
               )}
             </p>
-            <img key={imgSrc} src={imgSrc}
-              onError={e => {
-                const img = e.currentTarget;
-                if (imgFallback && img.src !== imgFallback && !img.dataset.fb) { img.dataset.fb = '1'; img.src = imgFallback; }
-                onImgError?.();
-              }}
-              alt="" className="w-full object-contain bg-white rounded" style={{ maxHeight: '60vh' }} />
+            <ImagenEnAlta key={imgSrc} src={imgSrc} fallback={imgFallback} size={item.size} onImgError={onImgError} />
             <div className="flex items-center gap-2 mt-2 text-[9px] text-gray-500 dark:text-gray-400">
               {item.size && <span>{item.size}</span>}
               {item.quality && <span>· quality {item.quality}</span>}

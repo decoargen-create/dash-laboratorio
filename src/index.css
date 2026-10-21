@@ -14,21 +14,20 @@ html.dark {
    panel de Apariencia. Estos son los valores default (dorado Viora);
    App.jsx los sobreescribe en el <html> cuando el user elige otro color. */
 :root {
-  /* Lab Fusion (rebrand AdsLab OS): violeta como marca por defecto — antes el
-     default era el dorado Viora y el violeta dependía del accent elegido por
-     cada usuario en Apariencia. El cian y el verde menta entran como acentos
-     de interacción/éxito en los componentes, no acá. */
-  --brand-50: 245 243 255;
-  --brand-100: 237 233 254;
-  --brand-200: 221 214 254;
-  --brand-300: 196 181 253;
-  --brand-400: 167 139 250;
-  --brand-500: 139 92 246;
-  --brand-600: 124 58 237;
-  --brand-700: 109 40 217;
-  --brand-800: 91 33 182;
-  --brand-900: 76 29 149;
-  --brand-950: 46 16 101;
+  /* Rebrand Kombialo: el azul de la marca. 500 = celeste #009ffd (foco,
+     links, elegido), 600 = azul #2676f5, 700 = índigo #3445d3 (los dos
+     extremos del degradado de la acción principal). */
+  --brand-50: 236 246 255;
+  --brand-100: 214 236 255;
+  --brand-200: 176 218 255;
+  --brand-300: 125 196 255;
+  --brand-400: 56 172 253;
+  --brand-500: 0 159 253;
+  --brand-600: 38 118 245;
+  --brand-700: 52 69 211;
+  --brand-800: 40 52 166;
+  --brand-900: 30 38 122;
+  --brand-950: 18 22 70;
 }
 
 /* Foco de teclado visible GLOBAL (fallback de accesibilidad). Muchos controles
@@ -43,6 +42,8 @@ html.dark {
 }
 
 body {
+  font-feature-settings: 'cv11', 'ss01';
+  -webkit-font-smoothing: antialiased;
   @apply bg-gray-50 text-gray-900 dark:bg-gray-950 dark:text-gray-100;
   /* En dark mode subimos a gray-950 (más profundo) para que el mesh gradient
      decorativo abajo respire con más contraste. */
@@ -69,6 +70,12 @@ body {
   background: none;
 }
 .dark .app-mesh-bg::before { background: none; }
+/* Kombialo: fondo casi negro con una luz azul arriba a la derecha. Va en el
+   propio <main> (no en el ::before fijo: un fixed dentro del main se pintaba
+   ENCIMA de la barra lateral). `fixed` la deja quieta al scrollear. */
+.dark .app-mesh-bg {
+  background: radial-gradient(1200px 700px at 80% -10%, #14264a 0%, #0a0a12 55%) fixed, #0a0a12;
+}
 
 /* ===== Glassmorphism — cards y headers con vidrio esmerilado ===========
    `glass` para superficies primarias (sticky headers, modals).
@@ -81,7 +88,7 @@ body {
   border: 1px solid rgba(0, 0, 0, 0.07);
 }
 .dark .glass {
-  background: rgb(17 24 39);
+  background: #12121c;
   border-color: rgba(255, 255, 255, 0.08);
 }
 .glass-card {
@@ -89,17 +96,17 @@ body {
   border: 1px solid rgba(0, 0, 0, 0.06);
 }
 .dark .glass-card {
-  background: rgb(31 41 55);
-  border-color: rgba(255, 255, 255, 0.06);
+  background: linear-gradient(180deg, #171726, #12121c);
+  border-color: rgba(160, 160, 220, 0.1);
 }
 /* Fallback para browsers sin backdrop-filter (Firefox <103 con flag
    desactivada, navegadores viejos). Sin esto las cards quedan con
    contraste ~2:1 sobre el mesh-gradient pastel. Audit MED. */
 @supports not (backdrop-filter: blur(1px)) {
   .glass { background: rgba(255, 255, 255, 0.96); }
-  .dark .glass { background: rgba(17, 24, 39, 0.96); }
+  .dark .glass { background: rgba(18, 18, 28, 0.96); }
   .glass-card { background: rgba(255, 255, 255, 0.94); }
-  .dark .glass-card { background: rgba(31, 41, 55, 0.94); }
+  .dark .glass-card { background: rgba(23, 23, 38, 0.94); }
 }
 
 /* ===== Acento fluorescente — CTAs primarios con glow brand ============

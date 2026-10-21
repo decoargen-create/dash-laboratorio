@@ -1,9 +1,9 @@
-// 🚀 Publicar campaña — el lanzador de AdsLab (pestaña de Métricas).
+// 🚀 Publicar campaña — el lanzador de Kombialo (pestaña de Métricas).
 //
 // Armás acá lo que antes armabas a mano en el Ads Manager: elegís una de las
 // tres recetas del equipo (CBO Deep Pocket / CBO Cost Cap / ABO Bid Cap),
 // presupuesto y puja, la config básica (página, píxel, país, edades) y pegás
-// los anuncios como "Nombre | post id" (uno por línea). AdsLab crea campaña +
+// los anuncios como "Nombre | post id" (uno por línea). Kombialo crea campaña +
 // conjuntos + creativos + ads en Meta, PAUSADO por default para que revises.
 //
 // Post id: puede venir "pageId_postId" (como lo da Meta) o el id pelado — en

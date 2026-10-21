@@ -1414,7 +1414,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
     try { localStorage.setItem('adslab-productos-vista', vista); } catch {}
   }, [vista]);
   const [prodDraft, setProdDraft] = useState({ nombre: '', landingUrl: '', descripcion: '' });
-  // Wizard de ALTA de producto (AdsLab OS, etapa 1): el producto nace
+  // Wizard de ALTA de producto (Kombialo OS, etapa 1): el producto nace
   // enchufado — cuenta publicitaria, campaña base de referencia, break-even
   // y primeros competidores, todo en el alta en vez de configurarse después.
   const [wizPaso, setWizPaso] = useState(1);
@@ -3227,7 +3227,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
           </div>
         </div>
 
-        {/* Alta de producto: WIZARD de 3 pasos (AdsLab OS, etapa 1). El
+        {/* Alta de producto: WIZARD de 3 pasos (Kombialo OS, etapa 1). El
             producto nace enchufado: cuenta publicitaria, campaña base de
             referencia, break-even y competidores — todo acá, una sola vez. */}
         {showProdForm && (
@@ -3379,7 +3379,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
               <div className="w-14 h-14 mx-auto rounded-2xl bg-gradient-to-br from-brand-500 to-amber-500 flex items-center justify-center text-white shadow-lg mb-4">
                 <Sparkles size={26} />
               </div>
-              <h3 className="text-xl md:text-2xl font-extrabold text-gray-900 dark:text-gray-100">¡Bienvenido a AdsLab!</h3>
+              <h3 className="text-xl md:text-2xl font-extrabold text-gray-900 dark:text-gray-100">¡Bienvenido a Kombialo!</h3>
               <p className="text-sm text-gray-600 dark:text-gray-400 mt-2 max-w-md mx-auto">
                 Acá cargás un producto, analizamos los ads ganadores de tu competencia y te generamos ideas y creativos listos para publicar. Empecemos por tu primer producto.
               </p>

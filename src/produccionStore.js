@@ -1236,7 +1236,7 @@ async function notificarEventoDiscord(a, event, from, extra = {}) {
         from: from || '',
         to: event === 'nuevo' ? '' : event,
         actor: _actorName || '',
-        // Link DIRECTO a la tarjeta en AdsLab (abre esa tarjeta puntual, no el
+        // Link DIRECTO a la tarjeta en Kombialo (abre esa tarjeta puntual, no el
         // tablero entero) → para que el editor sepa exactamente cuál es.
         cardUrl: (typeof window !== 'undefined' && a.id) ? `${window.location.origin}/?prod=${encodeURIComponent(a.id)}` : '',
         // Semana de la tarjeta, como contexto extra en el aviso.

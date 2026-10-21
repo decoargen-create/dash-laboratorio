@@ -1,6 +1,6 @@
 // Prender y pausar entidades de Meta — la parte que se puede razonar sin red.
 //
-// Este es el primer endpoint de AdsLab que ESCRIBE en la cuenta publicitaria.
+// Este es el primer endpoint de Kombialo que ESCRIBE en la cuenta publicitaria.
 // Todo lo demás lee. Por eso la validación vive acá, en un módulo puro y
 // testeado, en vez de estar desparramada en el handler: lo que se le manda a
 // Meta tiene que ser exactamente lo que se quiso mandar.

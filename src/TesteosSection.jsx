@@ -658,7 +658,7 @@ function VistaReglas({ campaigns, cfg, setCfg, productos, currency, onWhy, orige
           <span className="text-[10.5px] text-gray-400">el que anotás vos para cada producto</span>
         </div>
         <div className="grid md:grid-cols-3 gap-3 p-3.5">
-          {productos.length === 0 && <p className="text-[11px] text-gray-400">No hay productos cargados en AdsLab todavía.</p>}
+          {productos.length === 0 && <p className="text-[11px] text-gray-400">No hay productos cargados en Kombialo todavía.</p>}
           {productos.map(p => {
             const ef = cfgPara(cfg, p.id);
             return (

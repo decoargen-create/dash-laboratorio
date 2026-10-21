@@ -15,7 +15,7 @@ const COOLDOWN_MS = 6 * 60 * 60 * 1000; // 6h — no repetir el aviso si sigue c
 
 const REASON_TEXT = {
   'permiso-vencido': 'El permiso de Google venció o fue revocado. Las subidas de video a Drive NO están funcionando.',
-  'manual': 'Se desconectó Drive manualmente desde AdsLab.',
+  'manual': 'Se desconectó Drive manualmente desde Kombialo.',
 };
 
 function isDiscordWebhook(u) {
@@ -64,7 +64,7 @@ async function resolveWebhook(svc, ownerId) {
 async function sendDiscord(url, reason) {
   const embed = {
     title: '⚠️ Drive desconectado',
-    description: REASON_TEXT[reason] || 'El Drive de AdsLab dejó de funcionar.',
+    description: REASON_TEXT[reason] || 'El Drive de Kombialo dejó de funcionar.',
     color: 0xEF4444,
     fields: [{
       name: 'Qué hacer',
@@ -76,7 +76,7 @@ async function sendDiscord(url, reason) {
   try {
     await fetch(url, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username: 'AdsLab · Drive', embeds: [embed] }),
+      body: JSON.stringify({ username: 'Kombialo · Drive', embeds: [embed] }),
     });
   } catch {}
 }
@@ -85,7 +85,7 @@ async function sendEmail(to, reason) {
   const key = process.env.RESEND_API_KEY;
   const from = process.env.AUTH_FROM || 'Laboratorio Viora <onboarding@resend.dev>';
   if (!key || !to) return;
-  const detalle = REASON_TEXT[reason] || 'El Drive de AdsLab dejó de funcionar.';
+  const detalle = REASON_TEXT[reason] || 'El Drive de Kombialo dejó de funcionar.';
   const appUrl = String(process.env.APP_URL || '').replace(/\/$/, '');
   const link = appUrl ? `${appUrl}` : '';
   try {
@@ -94,7 +94,7 @@ async function sendEmail(to, reason) {
       headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
         from, to,
-        subject: '⚠️ El Drive de AdsLab se desconectó',
+        subject: '⚠️ El Drive de Kombialo se desconectó',
         html: `
           <div style="font-family:system-ui,sans-serif;max-width:480px;margin:0 auto;padding:24px;color:#222">
             <h2 style="color:#b91c1c;margin:0 0 12px">⚠️ Drive desconectado</h2>
@@ -104,7 +104,7 @@ async function sendEmail(to, reason) {
             </p>
             <p>Para arreglarlo entrá a <b>Producción → Ajustes → Reconectar Drive</b>.</p>
             ${link ? `<p style="text-align:center;margin:24px 0">
-              <a href="${link}" style="display:inline-block;background:#e11d48;color:white;padding:12px 24px;border-radius:8px;text-decoration:none;font-weight:600">Abrir AdsLab</a>
+              <a href="${link}" style="display:inline-block;background:#e11d48;color:white;padding:12px 24px;border-radius:8px;text-decoration:none;font-weight:600">Abrir Kombialo</a>
             </p>` : ''}
             <p style="font-size:12px;color:#888">Este aviso se manda una vez; si el Drive sigue caído no te lo repetimos por unas horas.</p>
           </div>`,

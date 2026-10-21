@@ -415,7 +415,7 @@ export default function PublicarCampanaModal({ a, onClose, addToast, soloPreset 
                     <Film size={13} className="text-gray-400 shrink-0" />
                     <span className="flex-1 min-w-0 truncate text-xs text-gray-800 dark:text-gray-100" title={f.name}>{f.name}</span>
                     {f.aprobado && <span className="text-[9px] font-bold text-emerald-600 dark:text-emerald-400 shrink-0">APROBADO</span>}
-                    <span className="text-[9px] text-gray-400 shrink-0">{f.driveId ? 'Drive' : 'AdsLab'}</span>
+                    <span className="text-[9px] text-gray-400 shrink-0">{f.driveId ? 'Drive' : 'Kombialo'}</span>
                   </label>
                 ))}
               </div>

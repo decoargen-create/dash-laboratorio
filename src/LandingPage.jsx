@@ -3,7 +3,7 @@ import {
   ArrowRight, Moon, Sun, Sparkles, Zap, Image as ImageIcon, BarChart3,
   Target, Bot, Layers, Search, Wand2, Eye, Send,
 } from 'lucide-react';
-import { AdsLabLogo, AdsLabMark } from './logo.jsx';
+import { KombialoLogo, KombialoMark } from './logo.jsx';
 
 // Hook minimal para hacer fade-in cuando el elemento entra al viewport.
 function useInView(options = { threshold: 0.15 }) {
@@ -226,8 +226,8 @@ export default function LandingPage({ onAccess }) {
       <nav className="fixed top-0 left-0 right-0 z-40 backdrop-blur-md bg-white/60 dark:bg-gray-950/60 border-b border-violet-100/50 dark:border-gray-800/50">
         <div className="max-w-6xl mx-auto px-6 py-3 flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <AdsLabMark size={32} />
-            <span className="text-sm font-semibold tracking-widest uppercase text-gray-700 dark:text-gray-200">AdsLab</span>
+            <KombialoMark size={32} />
+            <span className="text-sm font-semibold tracking-widest uppercase text-gray-700 dark:text-gray-200">Kombialo</span>
           </div>
           <div className="flex items-center gap-2">
             <button
@@ -271,7 +271,7 @@ export default function LandingPage({ onAccess }) {
         >
           <FadeIn>
             <div className="flex justify-center mb-8">
-              <AdsLabLogo size="xl" variant={darkMode ? 'light' : 'default'} />
+              <KombialoLogo size="xl" variant={darkMode ? 'light' : 'default'} />
             </div>
           </FadeIn>
           <FadeIn delay={120}>
@@ -345,7 +345,7 @@ export default function LandingPage({ onAccess }) {
 
       <Marquee />
 
-      {/* Features — qué hace AdsLab */}
+      {/* Features — qué hace Kombialo */}
       <section id="features" className="py-20 px-6 border-t border-violet-100/50 dark:border-gray-800/50">
         <div className="max-w-5xl mx-auto">
           <FadeIn>
@@ -395,7 +395,7 @@ export default function LandingPage({ onAccess }) {
           <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
             {[
               { n: '01', icon: Layers,  t: 'Setup', d: 'Cargá tu producto, descripción, research y color de marca. Una sola vez.' },
-              { n: '02', icon: Target,  t: 'Competencia', d: 'Sumá los competidores que querés trackear. AdsLab scrapea sus ads activos.' },
+              { n: '02', icon: Target,  t: 'Competencia', d: 'Sumá los competidores que querés trackear. Kombialo scrapea sus ads activos.' },
               { n: '03', icon: Eye,     t: 'Inspiración', d: 'Mirás el Top 10 de ads ganadores rankeados por días corriendo + variantes activas.' },
               { n: '04', icon: Send,    t: 'Generar', d: 'Click "Crear creativo". Sonnet planifica, gpt-image-2 ejecuta. Listo para Meta.' },
             ].map((step, i) => {
@@ -422,7 +422,7 @@ export default function LandingPage({ onAccess }) {
         <div className="max-w-3xl mx-auto">
           <FadeIn>
             <h2 className="text-2xl md:text-3xl font-light text-gray-900 dark:text-gray-100 mb-6">
-              Por qué AdsLab y no usar gpt-image-2 a pelo
+              Por qué Kombialo y no usar gpt-image-2 a pelo
             </h2>
             <ul className="space-y-3 text-gray-700 dark:text-gray-300">
               <li className="flex items-start gap-3">
@@ -473,11 +473,11 @@ export default function LandingPage({ onAccess }) {
       <footer className="py-8 px-6 border-t border-violet-100/50 dark:border-gray-800/50">
         <div className="max-w-5xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-4 text-sm text-gray-500 dark:text-gray-400">
           <div className="flex items-center gap-2">
-            <AdsLabMark size={28} />
-            <span className="font-semibold text-gray-700 dark:text-gray-200">AdsLab</span>
+            <KombialoMark size={28} />
+            <span className="font-semibold text-gray-700 dark:text-gray-200">Kombialo</span>
           </div>
           <div className="flex flex-col sm:flex-row items-center gap-2 sm:gap-6">
-            <span className="text-xs">© {new Date().getFullYear()} AdsLab — Tool para Meta Ads</span>
+            <span className="text-xs">© {new Date().getFullYear()} Kombialo — Tool para Meta Ads</span>
           </div>
         </div>
       </footer>

@@ -1,4 +1,4 @@
-// Home pública de AdsLab — lo que ve un visitante SIN sesión en
+// Home pública de Kombialo — lo que ve un visitante SIN sesión en
 // adslab-studio.vercel.app. Versión "resultados": dolores del media buyer
 // resueltos + demo animada tipo GIF de la plataforma en uso (cursor que
 // pausa, escala, marca winners y publica, en loop).
@@ -12,13 +12,13 @@
 import React, { useEffect, useRef } from 'react';
 
 const CSS = `
-  /* Landing comercial de AdsLab v4 — dolor → solución → resultado, con la
+  /* Landing comercial de Kombialo v4 — dolor → solución → resultado, con la
      plataforma mostrándose EN USO (demo animada tipo GIF con cursor).
      Progresivo: el contenido se ve siempre; los reveals solo con html.js. */
   :root{
-    --bg:#0a0e1d; --bg2:#0d1428; --panel:#121a31; --line:#20294a; --line2:#32406e;
-    --fg:#f1f4fd; --mut:#93a2c6; --mut2:#5e6d93;
-    --violeta:#8b5cf6; --violeta2:#a78bfa; --cian:#38bdf8; --rosa:#f472b6; --ambar:#fbbf24; --verde:#34d399; --rojo:#fb7185;
+    --bg:#0a0a12; --bg2:#0e0e17; --panel:#12121c; --line:#1f1f30; --line2:#2b3150;
+    --fg:#f0effa; --mut:#9c9cb8; --mut2:#68688a;
+    --violeta:#3445d3; --violeta2:#7dc4ff; --cian:#009ffd; --rosa:#4f8dfb; --ambar:#fbbf24; --verde:#34d399; --rojo:#fb7185;
     color-scheme: dark;
   }
   .lp{min-height:100vh;background:var(--bg); color:var(--fg); margin:0; font-family:Inter,system-ui,sans-serif; font-size:15px; line-height:1.6; padding-inline:16px; padding-block:0 60px; overflow-x:hidden;}
@@ -39,14 +39,14 @@ const CSS = `
 
   nav{display:flex; align-items:center; gap:12px; padding:18px 0; position:relative; z-index:3;}
   .logo{display:inline-flex; align-items:center; gap:10px; font-family:Sora; font-weight:800; font-size:18px;}
-  .logo .cubo{width:33px;height:33px;border-radius:10px;background:linear-gradient(135deg,var(--violeta),var(--cian));display:grid;place-items:center; box-shadow:0 4px 18px rgba(139,92,246,.45);}
-  .logo .cubo svg{width:17px;height:17px;stroke:#fff;}
+  .logo .cubo{width:33px;height:33px;border-radius:9px;overflow:hidden;display:grid;place-items:center; box-shadow:0 4px 12px -4px rgba(38,118,245,.55);}
+  .logo .cubo svg{stroke:none;}
   nav .links{margin-left:auto; display:flex; gap:24px; font-size:13.5px; color:var(--mut); font-weight:600;}
   nav .links a{color:inherit; text-decoration:none;} nav .links a:hover{color:var(--fg)}
   .btn{display:inline-flex; align-items:center; justify-content:center; gap:9px; border-radius:13px; padding:13px 24px; font-weight:800; font-size:14px; text-decoration:none; border:1px solid var(--line2); color:var(--fg); transition:.18s; cursor:pointer; background:none; font-family:inherit;}
   .btn:hover{border-color:var(--violeta); transform:translateY(-1px);}
-  .btn.primario{background:linear-gradient(94deg,var(--violeta),#6d4df0 45%,var(--cian)); background-size:200% 100%; border:none; box-shadow:0 10px 32px rgba(139,92,246,.45); animation:ola 6s linear infinite;}
-  .btn.primario:hover{box-shadow:0 14px 44px rgba(139,92,246,.65); transform:translateY(-2px) scale(1.02);}
+  .btn.primario{background:linear-gradient(94deg,var(--violeta),#2676f5 45%,var(--cian)); background-size:200% 100%; border:none; box-shadow:0 10px 32px rgba(38,118,245,.45); animation:ola 6s linear infinite;}
+  .btn.primario:hover{box-shadow:0 14px 44px rgba(38,118,245,.65); transform:translateY(-2px) scale(1.02);}
   .btn.chico{padding:9px 17px; font-size:13px;}
   @media (max-width:680px){ nav .links{display:none} }
 
@@ -59,7 +59,7 @@ const CSS = `
   /* :not(.blob): los blobs son absolute (fondo) — sin esto esta regla los
      pisa, entran al flujo y empujan todo el hero abajo del fold. */
   .hero>*:not(.blob){position:relative; z-index:1;}
-  .pill{display:inline-flex; align-items:center; gap:8px; border:1px solid rgba(139,92,246,.5); background:rgba(139,92,246,.1); border-radius:999px; padding:7px 16px; font-size:12px; color:var(--violeta2); font-weight:700;}
+  .pill{display:inline-flex; align-items:center; gap:8px; border:1px solid rgba(38,118,245,.5); background:rgba(38,118,245,.1); border-radius:999px; padding:7px 16px; font-size:12px; color:var(--violeta2); font-weight:700;}
   .pill .punto{width:7px;height:7px;border-radius:50%;background:var(--verde); animation:pulso 1.8s ease-in-out infinite;}
   @keyframes pulso{0%,100%{box-shadow:0 0 0 0 rgba(52,211,153,.5)}50%{box-shadow:0 0 0 7px rgba(52,211,153,0)}}
   .hero h1{font-size:clamp(31px,5.6vw,56px); margin:20px auto 0; max-width:19ch; line-height:1.08; font-weight:800;}
@@ -68,7 +68,7 @@ const CSS = `
   .hero .micro{font-size:12px; color:var(--mut2); margin-top:12px;}
 
   /* ═══ demo tipo GIF: la plataforma usándose sola ═══ */
-  .tv{max-width:760px; margin:40px auto 0; background:var(--bg2); border:1px solid var(--line2); border-radius:20px; overflow:hidden; box-shadow:0 30px 90px rgba(0,0,0,.55), 0 0 0 1px rgba(139,92,246,.15), 0 0 80px rgba(139,92,246,.12); text-align:left; position:relative;}
+  .tv{max-width:760px; margin:40px auto 0; background:var(--bg2); border:1px solid var(--line2); border-radius:20px; overflow:hidden; box-shadow:0 30px 90px rgba(0,0,0,.55), 0 0 0 1px rgba(38,118,245,.15), 0 0 80px rgba(38,118,245,.12); text-align:left; position:relative;}
   .tv .top{display:flex; align-items:center; gap:7px; padding:11px 14px; border-bottom:1px solid var(--line); background:var(--panel);}
   .tv .top i{width:10px;height:10px;border-radius:50%;}
   .tv .top i:nth-child(1){background:var(--rojo)} .tv .top i:nth-child(2){background:var(--ambar)} .tv .top i:nth-child(3){background:var(--verde)}
@@ -168,7 +168,7 @@ const CSS = `
   .plan.star{border:1px solid transparent; background:
     linear-gradient(var(--panel),var(--panel)) padding-box,
     linear-gradient(140deg,var(--violeta),var(--cian),var(--rosa)) border-box;
-    box-shadow:0 22px 60px rgba(139,92,246,.26);}
+    box-shadow:0 22px 60px rgba(38,118,245,.26);}
   .plan .tag{position:absolute; top:-13px; left:50%; transform:translateX(-50%); background:linear-gradient(92deg,var(--violeta),var(--cian)); font-size:10.5px; font-weight:800; letter-spacing:.08em; border-radius:999px; padding:5px 15px; white-space:nowrap;}
   .plan h3{margin:0; font-size:17px;}
   .plan .p{font-family:Sora; font-size:38px; font-weight:800; font-variant-numeric:tabular-nums;}
@@ -179,7 +179,7 @@ const CSS = `
   .plan li svg{position:absolute; left:0; top:3px; width:14px; height:14px; color:var(--verde);}
 
   .final{margin-top:96px; text-align:center; border-radius:26px; padding:56px 24px; position:relative; overflow:hidden; border:1px solid var(--line2);
-    background:radial-gradient(620px 260px at 50% -20%, rgba(139,92,246,.3), transparent), radial-gradient(400px 200px at 80% 110%, rgba(56,189,248,.18), transparent), var(--panel);}
+    background:radial-gradient(620px 260px at 50% -20%, rgba(38,118,245,.3), transparent), radial-gradient(400px 200px at 80% 110%, rgba(56,189,248,.18), transparent), var(--panel);}
   .final h2{font-size:clamp(25px,4vw,40px); margin:0 0 10px; font-weight:800;}
   .final p{color:var(--mut); margin:0 0 28px;}
   footer{margin-top:46px; display:flex; gap:16px; align-items:center; color:var(--mut2); font-size:12px; flex-wrap:wrap; border-top:1px solid var(--line); padding-top:24px;}
@@ -199,7 +199,7 @@ const HTML = `<svg width="0" height="0" style="position:absolute" aria-hidden="t
 
 <div class="wrap">
   <nav>
-    <span class="logo"><span class="cubo"><svg viewBox="0 0 24 24" class="ico"><use href="#i-flask"/></svg></span>AdsLab</span>
+    <span class="logo"><span class="cubo"><svg viewBox="0 0 1024 1024" style="width:100%;height:100%;display:block"><defs><linearGradient id="kbKl" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#0a9fff"/><stop offset=".5" stop-color="#1b6aea"/><stop offset="1" stop-color="#3a3fce"/></linearGradient></defs><rect width="1024" height="1024" rx="256" fill="url(#kbKl)"/><path fill="#fff" d="M288 252H395V470L583 252H748L700 307A65 65 0 0 0 612 400L540 492L742 770H608L467 578L395 662V770H288Z"/><circle cx="665" cy="360" r="38" fill="#2ee3ff"/></svg></span>Kombialo</span>
     <div class="links"><a href="#dolores">Para quién</a><a href="#precios">Precios</a></div>
     <button class="btn chico" data-accion="entrar">Entrar</button>
   </nav>
@@ -209,7 +209,7 @@ const HTML = `<svg width="0" height="0" style="position:absolute" aria-hidden="t
     <div class="blob a"></div><div class="blob b"></div>
     <span class="pill"><span class="punto"></span>Para marcas que invierten en Meta todos los días</span>
     <h1>Vendé más, quemá menos, <span class="grad">sin vivir en el Ads Manager</span></h1>
-    <p class="baja">AdsLab te avisa qué pausar antes de que se queme la plata, le dice solo a tu equipo qué video
+    <p class="baja">Kombialo te avisa qué pausar antes de que se queme la plata, le dice solo a tu equipo qué video
     está vendiendo para que lo replique, y te genera los creativos desde la competencia que ya funciona.
     Vos decidís en cinco minutos por día. El resto corre solo.</p>
     <div class="ctas">
@@ -219,12 +219,12 @@ const HTML = `<svg width="0" height="0" style="position:absolute" aria-hidden="t
 
     <!-- ═══ EL GIF: la plataforma usándose sola ═══ -->
     <div class="tv">
-      <div class="top"><i></i><i></i><i></i><span>app.adslab — Métricas</span><span class="vivo"><i></i>EN USO</span></div>
+      <div class="top"><i></i><i></i><i></i><span>kombialo.com — Métricas</span><span class="vivo"><i></i>EN USO</span></div>
       <div class="esc-zona" id="escZona">
 
         <!-- Escena 1: pausar a tiempo -->
         <div class="esc on" style="--path:pathA; --clickAt:1.6s">
-          <div class="titulo">07:58 AM — AdsLab revisa tus campañas con TU punto de equilibrio</div>
+          <div class="titulo">07:58 AM — Kombialo revisa tus campañas con TU punto de equilibrio</div>
           <div class="fila"><span class="sw"></span><span class="nom">Skincare · Escala</span><span class="roas verde">ROAS 3.44</span><span class="pillq ok">Va bien</span></div>
           <div class="fila muere"><span class="sw apagar"></span><span class="nom">Wellness · Testeo</span><span class="roas rojo">ROAS 0.97</span><span class="pillq bad">Pausar ya</span></div>
           <div class="fila"><span class="sw"></span><span class="nom">Home · Evergreen</span><span class="roas verde">ROAS 2.81</span><span class="pillq ok">Va bien</span></div>
@@ -246,7 +246,7 @@ const HTML = `<svg width="0" height="0" style="position:absolute" aria-hidden="t
           <div class="titulo">09:00 AM — los winners se marcan solos y tu equipo se entera</div>
           <div class="fila"><span class="estrella pop"><svg viewBox="0 0 24 24"><use href="#i-star"/></svg></span><span class="nom">Video C1 · Mecanismo</span><span class="roas verde">15 ventas</span><span class="pillq win">WINNER</span></div>
           <div class="fila"><span class="estrella pop2"><svg viewBox="0 0 24 24"><use href="#i-star"/></svg></span><span class="nom">Video C7 · Testimonio</span><span class="roas verde">14 ventas</span><span class="pillq win">WINNER</span></div>
-          <div class="notifD"><b style="color:var(--violeta2)">AdsLab → #equipo</b><br>2 winners nuevos. Los editores ya los ven como referencia.</div>
+          <div class="notifD"><b style="color:var(--violeta2)">Kombialo → #equipo</b><br>2 winners nuevos. Los editores ya los ven como referencia.</div>
           <span class="logro">Tu equipo replica lo que vende — sin que lo persigas</span>
         </div>
 
@@ -272,7 +272,7 @@ const HTML = `<svg width="0" height="0" style="position:absolute" aria-hidden="t
     <div class="dolores">
       <div class="dolor reveal" style="--acc:var(--rojo)">
         <p class="queja">Me di cuenta tarde y la campaña quemó $200.000 el fin de semana."</p>
-        <p class="sol">AdsLab revisa tus campañas todos los días contra <b>tu</b> punto de equilibrio por producto y te marca qué pausar — con el monto exacto que está en juego.</p>
+        <p class="sol">Kombialo revisa tus campañas todos los días contra <b>tu</b> punto de equilibrio por producto y te marca qué pausar — con el monto exacto que está en juego.</p>
         <span class="res"><svg viewBox="0 0 24 24" class="ico"><use href="#i-check"/></svg>Pausás a tiempo, todos los días</span>
       </div>
       <div class="dolor reveal d1" style="--acc:var(--ambar)">
@@ -282,7 +282,7 @@ const HTML = `<svg width="0" height="0" style="position:absolute" aria-hidden="t
       </div>
       <div class="dolor reveal d2" style="--acc:var(--rosa)">
         <p class="queja">Espero tres días un creativo nuevo y no sé si va a funcionar."</p>
-        <p class="sol">Elegís los ads de tu competencia que ya venden y AdsLab genera creativos con tu producto imitándolos — ángulos, eventos y nomenclatura incluidos.</p>
+        <p class="sol">Elegís los ads de tu competencia que ya venden y Kombialo genera creativos con tu producto imitándolos — ángulos, eventos y nomenclatura incluidos.</p>
         <span class="res"><svg viewBox="0 0 24 24" class="ico"><use href="#i-check"/></svg>Creativos listos en 2 minutos</span>
       </div>
       <div class="dolor reveal d3" style="--acc:var(--cian)">
@@ -355,13 +355,13 @@ const HTML = `<svg width="0" height="0" style="position:absolute" aria-hidden="t
 
   <!-- ═══ CTA FINAL ═══ -->
   <div class="final reveal">
-    <h2>La plata que quemaste este mes <span class="grad">pagaba 10 años de AdsLab</span></h2>
+    <h2>La plata que quemaste este mes <span class="grad">pagaba 10 años de Kombialo</span></h2>
     <p>Conectá tu cuenta de Meta y mirá qué habría pausado hoy. Son 30 segundos.</p>
-    <button class="btn primario" data-accion="entrar">Probar AdsLab 14 días gratis <svg viewBox="0 0 24 24" class="ico" style="width:15px;height:15px"><use href="#i-send"/></svg></button>
+    <button class="btn primario" data-accion="entrar">Probar Kombialo 14 días gratis <svg viewBox="0 0 24 24" class="ico" style="width:15px;height:15px"><use href="#i-send"/></svg></button>
   </div>
 
   <footer>
-    <span class="logo" style="font-size:14px"><span class="cubo" style="width:24px;height:24px;border-radius:8px"><svg viewBox="0 0 24 24" class="ico" style="width:12px;height:12px;stroke:#fff"><use href="#i-flask"/></svg></span>AdsLab</span>
+    <span class="logo" style="font-size:14px"><span class="cubo" style="width:24px;height:24px;border-radius:6px"><svg viewBox="0 0 1024 1024" style="width:100%;height:100%;display:block"><defs><linearGradient id="kbKl2" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#0a9fff"/><stop offset=".5" stop-color="#1b6aea"/><stop offset="1" stop-color="#3a3fce"/></linearGradient></defs><rect width="1024" height="1024" rx="256" fill="url(#kbKl2)"/><path fill="#fff" d="M288 252H395V470L583 252H748L700 307A65 65 0 0 0 612 400L540 492L742 770H608L467 578L395 662V770H288Z"/><circle cx="665" cy="360" r="38" fill="#2ee3ff"/></svg></span>Kombialo</span>
     <span>· Hecho en Argentina por gente que invierte en ads todos los días</span>
     <div class="links"><a href="#dolores">Para quién</a><a href="#precios">Precios</a><a href="#">Términos</a></div>
   </footer>
@@ -384,7 +384,7 @@ export default function Landing({ onEntrar }) {
     }
 
     const tituloAnterior = document.title;
-    document.title = 'AdsLab — Vende mas, quema menos, sin vivir en el Ads Manager';
+    document.title = 'Kombialo — Vende mas, quema menos, sin vivir en el Ads Manager';
 
     const onClick = (e) => {
       const btn = e.target.closest('[data-accion]');

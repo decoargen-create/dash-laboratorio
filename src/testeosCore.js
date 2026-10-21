@@ -321,7 +321,7 @@ export const ETAPAS = [
 ];
 
 // Qué producto es, cruzando el nombre de la campaña contra los productos que
-// ya están cargados en AdsLab.
+// ya están cargados en Kombialo.
 //
 // Dos formas de match, en este orden:
 //   1. ALIAS que cargó el equipo para ese producto ("aceit" → Aceite

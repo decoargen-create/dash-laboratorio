@@ -1672,23 +1672,17 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
   // pierdan entre sesiones.
   const [genOpts, setGenOpts] = useState(() => {
     try {
-      // Default recomendado: Portrait high × 4 variantes.
-      //   - Portrait (1024×1536): en feed/stories ocupa más pantalla que un
-      //     1:1 — mueve más el CTR que cualquier resolución extra. El 2K solo
-      //     existe en 1:1 y Meta igual comprime a ~1080px: queda para
-      //     regenerar a mano los ganadores que vivan fuera del feed.
-      //   - 4 variantes: el plan del Strategist va de réplica fiel a
-      //     creatividad libre; con 4 ya cubrís ese rango.
-      //   - high: siempre.
-      const RECOMENDADO = { n: 4, size: '1024x1536', quality: 'high', evento: '', eventoOferta: '', v: 2 };
+      // Default: 1:1 high × 4 variantes (4 cubre el rango del Strategist,
+      // de réplica fiel a creatividad libre).
+      // Ratio: SIEMPRE arranca en 1:1 (pedido del user 21/10), aunque la
+      // última tanda haya sido Portrait o 2K — el resto de las opciones sí
+      // se recuerdan.
+      const RECOMENDADO = { n: 4, size: '1024x1024', quality: 'high', evento: '', eventoOferta: '', v: 2 };
       const raw = localStorage.getItem('adslab-marketing-gen-opts');
       const parsed = raw ? JSON.parse(raw) : null;
-      // MIGRACIÓN v2 (one-shot): pisa lo persistido con el recomendado UNA
-      // vez. El `v: 2` queda guardado, así que lo que elijas a mano después
-      // (2K para un ganador, 6 variantes, etc.) sigue persistiendo normal.
       if (!parsed || parsed.v !== 2) return RECOMENDADO;
-      return parsed;
-    } catch { return { n: 4, size: '1024x1536', quality: 'high', evento: '', eventoOferta: '', v: 2 }; }
+      return { ...parsed, size: '1024x1024' };
+    } catch { return { n: 4, size: '1024x1024', quality: 'high', evento: '', eventoOferta: '', v: 2 }; }
   });
   useEffect(() => {
     try { localStorage.setItem('adslab-marketing-gen-opts', JSON.stringify(genOpts)); } catch {}

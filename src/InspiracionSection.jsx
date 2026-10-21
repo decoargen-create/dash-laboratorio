@@ -612,7 +612,7 @@ function BrandCard({ brand, ads, isScraping, adaptingAdIds, creandoAdIds, selecc
   // que el user pueda cerrar el overlay de error que ahora queda persistente.
   const isCompetidor = !!brand.isCompetidor;
   return (
-    <div className="group/brand bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-3 hover:border-amber-300 dark:hover:border-amber-700 transition">
+    <div className="group/brand self-start bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-3 hover:border-amber-300 dark:hover:border-amber-700 transition">
       <div className="flex items-center gap-2.5">
         <div className={`w-9 h-9 rounded-md flex items-center justify-center text-white font-bold text-sm shrink-0 ${
           isCompetidor
@@ -709,6 +709,15 @@ function BrandCard({ brand, ads, isScraping, adaptingAdIds, creandoAdIds, selecc
       {/* Notas — solo si hay, en línea aparte chiquita */}
       {brand.notas && (
         <p className="text-[10px] text-gray-600 dark:text-gray-400 italic mt-1.5 line-clamp-1">"{brand.notas}"</p>
+      )}
+
+      {/* Sin estáticos: aviso corto en vez de una tarjeta vacía gigante. */}
+      {ads.length === 0 && !isScraping && (
+        <p className="mt-2.5 text-[11px] text-gray-400 dark:text-gray-500 rounded-md bg-gray-50 dark:bg-gray-900/40 px-2.5 py-2">
+          {brand.lastScraped
+            ? 'Sin estáticos activos en la biblioteca de anuncios en el último scrape.'
+            : 'Todavía no se scrapeó — tocá Scrape para traer sus anuncios.'}
+        </p>
       )}
 
       {/* Grilla de estáticos scrapeados */}

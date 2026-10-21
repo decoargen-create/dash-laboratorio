@@ -3,7 +3,7 @@ import {
   Menu, LogOut, Home, ShoppingCart, Package, Users, AlertCircle, CreditCard,
   UserCheck, TrendingUp, Plus, Filter, Eye, Edit2, Trash2, Calendar, DollarSign,
   ChevronDown, ChevronRight, Search, X, Command, Check, Bell,
-  AlignJustify, LayoutGrid, LayoutGrid as LayoutGridIcon, Columns3, Sparkles, Bot, Zap, Activity, FileText, Settings, Loader2, Calculator, Copy, Save, RotateCcw, Target, Play, Inbox, BarChart3, Instagram, SlidersHorizontal, ClipboardList, AlertTriangle, Trophy, Bookmark, Film, Wallet, Gauge, Rocket,
+  AlignJustify, LayoutGrid, LayoutGrid as LayoutGridIcon, Columns3, Sparkles, Bot, Zap, Activity, FileText, Settings, Loader2, Calculator, Copy, Save, RotateCcw, Target, Play, Inbox, BarChart3, Instagram, SlidersHorizontal, ClipboardList, AlertTriangle, Trophy, Bookmark, Film, Wallet, Gauge, Rocket, Image as ImageIconKb,
 } from 'lucide-react';
 import { VioraLogo, VioraMark, KombialoLogo, KombialoMark } from './logo.jsx';
 import { installDebugLog, exportDebugLog } from './debugLog.js';
@@ -706,8 +706,8 @@ function PlatformSwitcher({ currentPlatform, onSwitch, sidebarOpen }) {
         {sidebarOpen && (
           <>
             <div className="flex-1 min-w-0 text-left">
-              <div className="text-[10px] font-semibold text-white/50 uppercase tracking-wider leading-none">Plataforma</div>
-              <div className="text-sm font-bold text-white truncate leading-tight mt-0.5">{platform.shortName}</div>
+              <div className="text-[14px] font-extrabold text-white truncate leading-tight">{platform.shortName}</div>
+              <div className="text-[11px] text-[#68688a] truncate leading-tight mt-0.5">{platform.logo ? 'Panel de anuncios' : 'Plataforma'}</div>
             </div>
             <ChevronDown size={14} className={`text-white/50 transition-transform ${open ? 'rotate-180' : ''}`} />
           </>
@@ -2489,44 +2489,38 @@ function AppShell({ onExit }) {
               {/* Cuenta por área (miembro): solo ve las secciones de SUS áreas. */}
               {/* Orden del menú a gusto del user (captura 14/10): Publicador
                   arriba en Operación y Meta Ads como entrada propia. */}
-              <NavSection title="Operación" sectionKey="mk-op" sidebarOpen={sidebarOpen}>
-                <NavItem icon={LayoutGridIcon} label="Home" section="mk-home" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
-                {/* Meta Ads salió del menú: es la pestaña "Cuentas de Meta" adentro de Métricas. */}
-                {(!currentUser.miembro || currentUser.miembro.areas.includes('metricas')) && (
-                  <NavItem icon={Gauge} label="Métricas" section="mk-metricas" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
-                )}
-                {(!currentUser.miembro || currentUser.miembro.areas.includes('produccion')) && (
-                  <NavItem icon={Rocket} label="Publicador" section="mk-publicar" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
-                )}
-              </NavSection>
+              {/* Menú con la estructura de Kombialo: ítems sueltos arriba y
+                  grupos (ícono + flecha) con sus secciones colgando de una
+                  línea. Suscripción clavada abajo de todo. */}
+              <NavItem icon={LayoutGridIcon} label="Inicio" section="mk-home" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
+              {/* Meta Ads salió del menú: es la pestaña "Cuentas de Meta" adentro de Métricas. */}
+              {(!currentUser.miembro || currentUser.miembro.areas.includes('metricas')) && (
+                <NavItem icon={Gauge} label="Métricas" section="mk-metricas" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
+              )}
+              {(!currentUser.miembro || currentUser.miembro.areas.includes('produccion')) && (
+                <NavItem icon={Rocket} label="Publicador" section="mk-publicar" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
+              )}
               {(!currentUser.miembro || currentUser.miembro.areas.includes('productos')) && (
-                <NavSection title="Creación de estáticos" sectionKey="mk-estaticos" sidebarOpen={sidebarOpen}>
-                  <NavItem icon={Play} label="Productos" section="mk-arranque" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
-                  {/* "Winners" (galería vieja de estáticos) y "Copy AI" salieron del
-                      menú (14/10, no se usaban — los winners REALES viven en
-                      Métricas y Producción). Las secciones siguen existiendo por
-                      URL/estado viejo; si el tracking de uso confirma cero visitas,
-                      se borra el código entero. */}
+                <NavSection title="Estáticos" icon={ImageIconKb} sectionKey="mk-estaticos" sidebarOpen={sidebarOpen}>
+                  <NavItem sub icon={Play} label="Productos" section="mk-arranque" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
                 </NavSection>
               )}
               {(!currentUser.miembro || currentUser.miembro.areas.some(a => a === 'produccion' || a === 'landings')) && (
-                <NavSection title="Área creativa" sectionKey="mk-creativa" sidebarOpen={sidebarOpen}>
+                <NavSection title="Área creativa" icon={Film} sectionKey="mk-creativa" sidebarOpen={sidebarOpen}>
                   {/* El Resumen (CreativaDashboard) vive embebido en el Home. */}
                   {(!currentUser.miembro || currentUser.miembro.areas.includes('produccion')) && (
-                    <NavItem icon={Film} label="Producción" section="mk-produccion" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
+                    <NavItem sub icon={Film} label="Producción" section="mk-produccion" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
                   )}
                   {(!currentUser.miembro || currentUser.miembro.areas.includes('landings')) && (
-                    <NavItem icon={ClipboardList} label="Landings" section="mk-landings" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
+                    <NavItem sub icon={ClipboardList} label="Landings" section="mk-landings" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
                   )}
                 </NavSection>
               )}
-              {/* Plan y facturación: solo el dueño (no miembros), clavado ABAJO
-                  de todo el menú (!mt-auto gana al space-y del nav). */}
+              {/* Suscripción: solo el dueño (no miembros), clavada ABAJO de
+                  todo el menú (!mt-auto gana al space-y del nav). */}
               {!currentUser.miembro && (
                 <div className="!mt-auto pt-4">
-                  <NavSection title="Cuenta" sectionKey="mk-cuenta" sidebarOpen={sidebarOpen} defaultOpen={false}>
-                    <NavItem icon={CreditCard} label="Plan y facturación" section="mk-plan" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
-                  </NavSection>
+                  <NavItem icon={CreditCard} label="Suscripción" section="mk-plan" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
                 </div>
               )}
               {/* "Finanzas → Gastos del stack" salió del menú (pedido del user):
@@ -2836,7 +2830,7 @@ function SidebarStats({ sidebarOpen, onNavGastos }) {
 // Agrupador colapsable de NavItems estilo Apify sidebar — título con
 // chevron, recordamos estado abierto/cerrado en localStorage. En modo
 // colapsado del sidebar mostramos solo un divisor sutil entre grupos.
-function NavSection({ title, sectionKey, sidebarOpen, defaultOpen = true, children }) {
+function NavSection({ title, sectionKey, sidebarOpen, defaultOpen = true, icon: Icon, children }) {
   const [open, setOpen] = useState(() => {
     try {
       const v = localStorage.getItem(`adslab-navsec-${sectionKey}`);
@@ -2850,6 +2844,27 @@ function NavSection({ title, sectionKey, sidebarOpen, defaultOpen = true, childr
       return next;
     });
   };
+  // Grupo estilo Kombialo: el grupo es un ítem más (ícono + nombre + flecha)
+  // y sus secciones cuelgan de una línea vertical, sin ícono. Plegado, los
+  // hijos se muestran como íconos sueltos.
+  if (Icon) {
+    if (!sidebarOpen) return <div className="space-y-1">{children}</div>;
+    return (
+      <div>
+        <button
+          onClick={toggle}
+          className="w-full flex items-center gap-[11px] px-3 py-2.5 rounded-[10px] text-[14px] font-semibold text-[#9c9cb8] hover:text-white hover:bg-[#1a1a2a] transition-colors duration-150"
+        >
+          <Icon size={19} className="shrink-0" />
+          <span className="flex-1 truncate text-left" title={title}>{title}</span>
+          <ChevronDown size={14} className={`shrink-0 opacity-60 transition-transform duration-150 ${open ? 'rotate-180' : ''}`} />
+        </button>
+        <div className={`ml-[21px] pl-2.5 border-l border-[rgba(160,160,220,0.12)] space-y-px overflow-hidden transition-all duration-200 ${open ? 'max-h-screen opacity-100 mt-0.5 mb-1.5' : 'max-h-0 opacity-0'}`}>
+          {children}
+        </div>
+      </div>
+    );
+  }
   if (!sidebarOpen) {
     return <div aria-hidden="true" className="my-2 mx-3 h-px bg-white/10" />;
   }
@@ -2872,13 +2887,27 @@ function NavSection({ title, sectionKey, sidebarOpen, defaultOpen = true, childr
   );
 }
 
-function NavItem({ icon: Icon, label, section, currentSection, onSelect, sidebarOpen }) {
+function NavItem({ icon: Icon, label, section, currentSection, onSelect, sidebarOpen, sub = false }) {
   const isActive = currentSection === section;
+  // Sub-sección de un grupo (estilo Kombialo): sin ícono, 13px, la elegida en
+  // celeste. Con la barra plegada vuelve a ser un ítem con ícono.
+  if (sub && sidebarOpen) {
+    return (
+      <button
+        onClick={() => onSelect(section)}
+        className={`w-full text-left px-2.5 py-[7px] rounded-lg text-[13px] font-semibold transition-colors duration-150 ${
+          isActive ? 'text-brand-400 bg-brand-500/10' : 'text-[#9c9cb8] hover:text-white hover:bg-[#1a1a2a]'
+        }`}
+      >
+        {label}
+      </button>
+    );
+  }
   return (
     <button
       onClick={() => onSelect(section)}
       title={!sidebarOpen ? label : undefined}
-      className={`group relative w-full flex items-center gap-2.5 px-3 py-2 rounded-lg transition-colors duration-200 ${
+      className={`group relative w-full flex items-center gap-[11px] px-3 py-2.5 rounded-[10px] transition-colors duration-150 ${
         isActive
           ? 'bg-[#1a1a2a] text-white'
           : 'text-[#9c9cb8] hover:text-white hover:bg-[#1a1a2a]'
@@ -2892,7 +2921,7 @@ function NavItem({ icon: Icon, label, section, currentSection, onSelect, sidebar
           isActive ? 'h-4 opacity-100' : 'h-0 opacity-0'
         }`}
       />
-      <Icon size={17} className="shrink-0" />
+      <Icon size={19} className="shrink-0" />
       {sidebarOpen && <span className="text-[14px] whitespace-nowrap font-semibold">{label}</span>}
       {/* Tooltip en modo colapsado */}
       {!sidebarOpen && (

@@ -54,11 +54,10 @@ import { listBoards, createBoard, addItemsToBoard } from './marketingBoardsApi.j
 // Galería ahora vive como tab independiente en el workspace (Arranque),
 // no más como modal acá.
 
-// Máximo de ads por tanda: 10. Más allá saturaríamos rate limits de
-// gpt-image-2 (típicamente 5-15 RPM) y el browser quedaría unresponsive.
-// Con concurrencia 5 paralela y n=2 fijo, 10 ads × 2 variantes = 20 imágenes
-// en ~3 min, costo ~$3.60.
-const MAX_SELECCIONADOS = 10;
+// Máximo de ads por tanda: 20 (pedido 21/10, antes 10). Los ads se procesan
+// de a UNO (BULK_CONCURRENCY=1), así que el tope no satura el rate limit de
+// gpt-image: solo alarga la tanda (~75 s por ad → 20 ads ≈ 25 min).
+const MAX_SELECCIONADOS = 20;
 // Bajamos de 5 a 3 paralelos — gpt-image-2 tier 1 = 5 RPM, queremos margen
 // para no triggear el rate limit. El endpoint igual hace auto-retry con
 // backoff (15s, 30s) si OpenAI tira 429, así que los pico que sí lleguen

@@ -593,7 +593,7 @@ function GalleryTableView({ items, blobUrls, seleccionados, selectedOrder, onTog
 
 // Lightbox separado para mantener este archivo manejable.
 
-function Lightbox({ item, imgSrc, onClose, showDebug, setShowDebug, onDownload, onDelete, onToggleDescargada, onArchive, onToggleWinner, onIterateWinner, iterating = false, onRegenerar, regenerating = false }) {
+function Lightbox({ item, imgSrc, imgFallback = '', onImgError = null, onClose, showDebug, setShowDebug, onDownload, onDelete, onToggleDescargada, onArchive, onToggleWinner, onIterateWinner, iterating = false, onRegenerar, regenerating = false }) {
   const metrics = item.winnerMetrics || {};
   // Panel "Regenerar / Corregir": se abre con el botón y toma una instrucción
   // opcional de ajuste ("el cepillo más grande, sin cápsulas").
@@ -645,7 +645,12 @@ function Lightbox({ item, imgSrc, onClose, showDebug, setShowDebug, onDownload, 
                 </span>
               )}
             </p>
-            <img src={imgSrc}
+            <img key={imgSrc} src={imgSrc}
+              onError={e => {
+                const img = e.currentTarget;
+                if (imgFallback && img.src !== imgFallback && !img.dataset.fb) { img.dataset.fb = '1'; img.src = imgFallback; }
+                onImgError?.();
+              }}
               alt="" className="w-full object-contain bg-white rounded" style={{ maxHeight: '60vh' }} />
             <div className="flex items-center gap-2 mt-2 text-[9px] text-gray-500 dark:text-gray-400">
               {item.size && <span>{item.size}</span>}
@@ -1800,7 +1805,11 @@ export default function GaleriaReferencialesModal({ productoId, productoNombre, 
       {selected && (
         <Lightbox
           item={selDetail && selDetail.id === selected.id ? { ...selected, ...selDetail } : selected}
-          imgSrc={blobUrls.get(selected.id) || ''}
+          // El detalle muestra el ORIGINAL en alta (la grilla usa la miniatura
+          // de 480px). Si el original falla, cae a la miniatura/caché.
+          imgSrc={(!selected.imageBase64 && selected.imageUrl) || blobUrls.get(selected.id) || ''}
+          imgFallback={blobUrls.get(selected.id) || selected.thumbUrl || ''}
+          onImgError={reFirmarSiHaceFalta}
           onClose={() => { setSelected(null); setShowDebug(false); }}
           showDebug={showDebug}
           setShowDebug={setShowDebug}

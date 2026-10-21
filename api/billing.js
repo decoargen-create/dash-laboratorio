@@ -1,4 +1,4 @@
-// Suscripciones — esqueleto del sistema de pagos de AdsLab.
+// Suscripciones — esqueleto del sistema de pagos de Kombialo.
 //
 // Los PLANES y sus límites viven acá (fuente de verdad); la tabla
 // public.suscripciones guarda el estado comercial de cada cuenta. Sin fila =
@@ -18,7 +18,7 @@
 
 import { getUserIdFromAuth, getServiceClient, isSupabaseConfigured } from './marketing/_supabase-server.js';
 
-// La misma lista del front (platformAdmin.js): quién opera AdsLab como producto.
+// La misma lista del front (platformAdmin.js): quién opera Kombialo como producto.
 const ADMIN_EMAILS = ['mrluks95@gmail.com'];
 
 export const PLANES = {

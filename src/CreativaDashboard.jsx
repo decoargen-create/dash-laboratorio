@@ -280,7 +280,7 @@ export default function CreativaDashboard({ addToast, embedded = false }) {
                               <ExternalLink size={12} /> Drive
                             </a>
                           ) : c.videos > 0 ? (
-                            <span className="text-[10px] text-gray-400" title="Se subió a AdsLab (antes de conectar Drive)">AdsLab</span>
+                            <span className="text-[10px] text-gray-400" title="Se subió a Kombialo (antes de conectar Drive)">Kombialo</span>
                           ) : null}
                           {publicable && (
                             <button onClick={(e) => { e.stopPropagation(); marcarPublicado(c); }}

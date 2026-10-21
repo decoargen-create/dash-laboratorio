@@ -67,12 +67,12 @@ async function sendDiscord(url, { titulo, detalle }) {
     await fetch(url, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        username: 'AdsLab · Meta',
+        username: 'Kombialo · Meta',
         embeds: [{
           title: titulo,
           description: detalle,
           color: 0xF59E0B,
-          fields: [{ name: 'Qué hacer', value: 'Entrá a AdsLab → **Arranque → Cuenta Meta → Conectar** (30 segundos).', inline: false }],
+          fields: [{ name: 'Qué hacer', value: 'Entrá a Kombialo → **Arranque → Cuenta Meta → Conectar** (30 segundos).', inline: false }],
           timestamp: new Date().toISOString(),
         }],
       }),
@@ -94,7 +94,7 @@ async function sendEmail(to, { asunto, titulo, detalle }) {
           <div style="font-family:system-ui,sans-serif;max-width:480px;margin:0 auto;padding:24px;color:#222">
             <h2 style="color:#b45309;margin:0 0 12px">${titulo}</h2>
             <p>${detalle}</p>
-            <p>Para arreglarlo: <b>AdsLab → Arranque → Cuenta Meta → Conectar</b> (30 segundos, con tu login de Facebook).</p>
+            <p>Para arreglarlo: <b>Kombialo → Arranque → Cuenta Meta → Conectar</b> (30 segundos, con tu login de Facebook).</p>
             <p style="font-size:12px;color:#888">Mientras esté desconectado no funcionan: métricas de campañas, performance de ads y "Winners desde Meta".</p>
           </div>`,
       }),
@@ -112,10 +112,10 @@ export async function alertMetaDown(motivo = '') {
   if (h?.down && lastMs && (now - lastMs) < COOLDOWN_MS) return; // ya avisado hace poco
   const [to, webhook] = await Promise.all([recipient(svc), resolveWebhook(svc)]);
   const titulo = '⚠️ La conexión de Meta se desconectó';
-  const detalle = `El token de Meta de AdsLab dejó de funcionar${motivo ? ` (${String(motivo).slice(0, 140)})` : ''}. Suele pasar al vencer (~60 días) o si cambió la contraseña de Facebook.`;
+  const detalle = `El token de Meta de Kombialo dejó de funcionar${motivo ? ` (${String(motivo).slice(0, 140)})` : ''}. Suele pasar al vencer (~60 días) o si cambió la contraseña de Facebook.`;
   await Promise.allSettled([
     webhook ? sendDiscord(webhook, { titulo, detalle }) : Promise.resolve(),
-    to ? sendEmail(to, { asunto: '⚠️ Meta se desconectó de AdsLab', titulo, detalle }) : Promise.resolve(),
+    to ? sendEmail(to, { asunto: '⚠️ Meta se desconectó de Kombialo', titulo, detalle }) : Promise.resolve(),
   ]);
   await setHealth(svc, { down: true, alert_at: new Date().toISOString() });
 }
@@ -154,7 +154,7 @@ export async function warnMetaExpiryIfDue() {
   const venceStr = vence.toLocaleDateString('es-AR', { day: 'numeric', month: 'numeric' });
   const [to, webhook] = await Promise.all([recipient(svc), resolveWebhook(svc)]);
   const titulo = '⏳ La conexión de Meta vence pronto';
-  const detalle = `El token de Meta de AdsLab (conexión de ${conn.meta_user_name || 'la cuenta'}) vence aproximadamente el ${venceStr}. Reconectá antes así no se corta nada.`;
+  const detalle = `El token de Meta de Kombialo (conexión de ${conn.meta_user_name || 'la cuenta'}) vence aproximadamente el ${venceStr}. Reconectá antes así no se corta nada.`;
   await Promise.allSettled([
     webhook ? sendDiscord(webhook, { titulo, detalle }) : Promise.resolve(),
     to ? sendEmail(to, { asunto: `⏳ La conexión de Meta vence el ${venceStr} — reconectá`, titulo, detalle }) : Promise.resolve(),

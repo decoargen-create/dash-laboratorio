@@ -7,6 +7,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { Mail, Lock, LogIn, UserPlus, AlertCircle, Loader2, KeyRound, Send } from 'lucide-react';
+import PulpoKombi from './PulpoKombi.jsx';
 import { supabase, onAuthChange } from './supabase.js';
 
 // Normaliza errores de Supabase Auth a un mensaje claro en español. Supabase a
@@ -120,10 +121,11 @@ export default function SupabaseAuthScreen({ onLoggedIn }) {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-pink-950 via-rose-900 to-purple-950 p-4">
-      <div className="w-full max-w-sm bg-white/5 backdrop-blur-xl border border-white/10 rounded-2xl shadow-2xl p-6">
-        <div className="text-center mb-5">
-          <h1 className="text-xl font-bold text-white mb-1">AdsLab</h1>
+    <div className="min-h-screen flex items-center justify-center p-4" style={{ background: 'radial-gradient(1200px 700px at 80% -10%, #14264a 0%, #0a0a12 55%)', backgroundColor: '#0a0a12' }}>
+      <div className="w-full max-w-sm border border-[rgba(160,160,220,0.1)] rounded-2xl shadow-2xl p-6" style={{ background: 'linear-gradient(180deg, #171726, #12121c)' }}>
+        <div className="text-center mb-5 flex flex-col items-center">
+          <PulpoKombi size={72} />
+          <h1 className="text-xl font-extrabold tracking-tight text-white mt-2 mb-1">Kombialo</h1>
           <p className="text-xs text-white/60">
             {mode === 'login' && 'Entrá con tu cuenta'}
             {mode === 'signup' && 'Creá una cuenta nueva'}
@@ -141,7 +143,7 @@ export default function SupabaseAuthScreen({ onLoggedIn }) {
                 value={displayName}
                 onChange={e => setDisplayName(e.target.value)}
                 placeholder="Cómo querés que te llame"
-                className="mt-1 w-full px-3 py-2 text-sm bg-white/5 border border-white/10 rounded-md text-white placeholder-white/30 focus:outline-none focus:ring-1 focus:ring-pink-400"
+                className="mt-1 w-full px-3 py-2 text-sm bg-white/5 border border-white/10 rounded-md text-white placeholder-white/30 focus:outline-none focus:ring-1 focus:ring-brand-500"
               />
             </div>
           )}
@@ -158,7 +160,7 @@ export default function SupabaseAuthScreen({ onLoggedIn }) {
                   value={email}
                   onChange={e => setEmail(e.target.value)}
                   placeholder="tu@email.com"
-                  className="w-full pl-8 pr-3 py-2 text-sm bg-white/5 border border-white/10 rounded-md text-white placeholder-white/30 focus:outline-none focus:ring-1 focus:ring-pink-400"
+                  className="w-full pl-8 pr-3 py-2 text-sm bg-white/5 border border-white/10 rounded-md text-white placeholder-white/30 focus:outline-none focus:ring-1 focus:ring-brand-500"
                   autoComplete="email"
                 />
               </div>
@@ -179,7 +181,7 @@ export default function SupabaseAuthScreen({ onLoggedIn }) {
                   onChange={e => setPassword(e.target.value)}
                   placeholder={(mode === 'signup' || mode === 'reset') ? 'Mínimo 6 caracteres' : 'Tu contraseña'}
                   minLength={6}
-                  className="w-full pl-8 pr-3 py-2 text-sm bg-white/5 border border-white/10 rounded-md text-white placeholder-white/30 focus:outline-none focus:ring-1 focus:ring-pink-400"
+                  className="w-full pl-8 pr-3 py-2 text-sm bg-white/5 border border-white/10 rounded-md text-white placeholder-white/30 focus:outline-none focus:ring-1 focus:ring-brand-500"
                   autoComplete={(mode === 'signup' || mode === 'reset') ? 'new-password' : 'current-password'}
                 />
               </div>
@@ -201,7 +203,7 @@ export default function SupabaseAuthScreen({ onLoggedIn }) {
           <button
             type="submit"
             disabled={loading}
-            className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-bold text-white bg-gradient-to-r from-pink-500 to-rose-500 rounded-md hover:from-pink-600 hover:to-rose-600 transition disabled:opacity-60 shadow-lg shadow-pink-900/40"
+            className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-bold text-white bg-gradient-to-b from-brand-500 to-brand-700 rounded-[10px] hover:brightness-110 transition disabled:opacity-60 shadow-[0_10px_24px_-10px_rgba(38,118,245,.5)]"
           >
             {loading
               ? <Loader2 size={15} className="animate-spin" />

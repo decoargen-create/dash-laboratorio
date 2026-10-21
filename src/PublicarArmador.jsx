@@ -97,7 +97,7 @@ export default function PublicarArmador({ producto, tarjetas, onVolver, onPublic
   const toggle = (k) => setSel(prev => { const n = new Set(prev); if (n.has(k)) n.delete(k); else n.add(k); return n; });
 
   // Vista previa de VIDEO tipo Drive (pedido del user): los de Drive usan el
-  // preview embebido (/file/<id>/preview); los subidos a AdsLab se firman y
+  // preview embebido (/file/<id>/preview); los subidos a Kombialo se firman y
   // se reproducen en un <video> directo.
   const [videoPrev, setVideoPrev] = useState(null); // { name, driveUrl? , fileUrl?, cargando }
   // Filtro de tarjetas (pedido del user): por defecto solo las APROBADAS (las
@@ -405,11 +405,11 @@ export default function PublicarArmador({ producto, tarjetas, onVolver, onPublic
       const msg = `${hechos.length}/${lotes.length} campaña${lotes.length === 1 ? '' : 's'} creada${hechos.length === 1 ? '' : 's'}${enPausa ? ' en pausa' : ''} 🚀`;
       addToast?.({ type: huboError ? 'warning' : 'success', message: msg });
       // Notificación del navegador: por si estás en otra pestaña esperando.
-      try { if ('Notification' in window && Notification.permission === 'granted') new Notification('AdsLab · Publicación lista ✓', { body: msg }); } catch {}
+      try { if ('Notification' in window && Notification.permission === 'granted') new Notification('Kombialo · Publicación lista ✓', { body: msg }); } catch {}
     } else {
       setFase('error');
       addToast?.({ type: 'error', message: 'No se pudo crear ninguna campaña — mirá el detalle.' });
-      try { if ('Notification' in window && Notification.permission === 'granted') new Notification('AdsLab · La publicación falló', { body: 'Mirá el detalle en el Publicador.' }); } catch {}
+      try { if ('Notification' in window && Notification.permission === 'granted') new Notification('Kombialo · La publicación falló', { body: 'Mirá el detalle en el Publicador.' }); } catch {}
     }
   }, [listo, lotes, loteMax, account, template, preset, producto, presupuesto, adsPorSet, enPausa, nombreBase, fechaCorta, mensaje, titular, programada, nombresCampanas, addToast, onPublicadas]); // eslint-disable-line react-hooks/exhaustive-deps
 

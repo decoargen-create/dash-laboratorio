@@ -14,7 +14,7 @@
 // su propia convención y no la pisamos.
 //
 // Si Drive no está configurado, devolvemos { configured:false } y el browser
-// cae a guardar en el bucket de AdsLab (Supabase) — así la subida siempre
+// cae a guardar en el bucket de Kombialo (Supabase) — así la subida siempre
 // funciona aunque todavía no hayas conectado la carpeta de Drive.
 
 import { getUserIdFromAuth } from '../marketing/_supabase-server.js';
@@ -89,7 +89,7 @@ export default async function handler(req, res) {
   if (ctx.failed) {
     // Drive está conectado pero el OAuth falló transitoriamente (ya se reintentó
     // 3× del lado del server). NO usamos la service account (403 sin quota, que
-    // mandaba todo a AdsLab). Que el front reintente / lo diga claro.
+    // mandaba todo a Kombialo). Que el front reintente / lo diga claro.
     // Además: un editor quiso subir y el Drive no responde → avisamos (mail +
     // Discord). El helper dedupea (cooldown), así que reintentos no spamean.
     try { await alertDriveDown('permiso-vencido'); } catch {}
@@ -103,7 +103,7 @@ export default async function handler(req, res) {
     // Carpeta de la tarjeta. Si ya la tenemos (subidas previas), la reusamos por
     // ID — así no depende del nombre, que pudo renombrarse a "… PUBLICADO".
     // Si no, armamos la ruta:
-    //   <raíz "Creativos AdsLab">/<Producto>/<Persona>/<Producto [Persona][d-m][id]>/
+    //   <raíz "Creativos Kombialo">/<Producto>/<Persona>/<Producto [Persona][d-m][id]>/
     // El [id] al final es lo que hace que cada TARJETA tenga su carpeta: sin
     // eso, dos tarjetas del mismo producto/persona/semana compartían carpeta.
     // Si la tarjeta trae folderId lo reusamos, PERO sólo si esa carpeta sigue
@@ -157,7 +157,7 @@ export default async function handler(req, res) {
 
     // Abrir la resumable session (con node:https crudo, no fetch: garantiza el
     // header Origin, que en el fetch de undici de Vercel se descartaba/rompía
-    // y hacía fallar la apertura — la causa real de que todo cayera a AdsLab).
+    // y hacía fallar la apertura — la causa real de que todo cayera a Kombialo).
     //
     // El Origin ATA la sesión al navegador para que el PUT directo browser→Google
     // reciba headers CORS. Si por lo que sea la apertura CON Origin falla,

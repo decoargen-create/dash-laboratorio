@@ -145,7 +145,7 @@ async function avisarDiscord(svc, ownerId, marcados, cfg) {
     await fetch(url, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        username: 'AdsLab · Winners',
+        username: 'Kombialo · Winners',
         embeds: [{
           title: `⭐ ${total} winner${total === 1 ? '' : 's'} nuevo${total === 1 ? '' : 's'} marcado${total === 1 ? '' : 's'} en Producción`,
           color: 0xF5A623,

@@ -1,3 +1,12 @@
+const KB_NEUTROS = {
+  50: '#f4f4fa', 100: '#f0effa', 200: '#d5d5ea', 300: '#b8b8d0', 400: '#9c9cb8',
+  500: '#7a7a9c', 600: '#4a4a66', 700: '#262638', 800: '#171726', 900: '#12121c', 950: '#0a0a12',
+};
+const KB_AZUL = {
+  50: '#ecf6ff', 100: '#d6ecff', 200: '#b0daff', 300: '#7dc4ff', 400: '#38acfd',
+  500: '#009ffd', 600: '#2676f5', 700: '#3445d3', 800: '#2834a6', 900: '#1e267a', 950: '#121646',
+};
+
 /** @type {import('tailwindcss').Config} */
 export default {
   darkMode: 'class',
@@ -7,7 +16,27 @@ export default {
   ],
   theme: {
     extend: {
+      // Tipografía de Kombialo: Inter en todo el panel.
+      fontFamily: {
+        sans: ['Inter', 'system-ui', '-apple-system', 'Segoe UI', 'Roboto', 'sans-serif'],
+      },
       colors: {
+        // ── Rebrand Kombialo (21/10) ─────────────────────────────────────
+        // Los neutrales de Kombialo tiran a azul-violeta (nada de grises
+        // puros): fondo #0a0a12, tarjetas #12121c/#171726, texto #f0effa,
+        // rótulos #9c9cb8. Se pisan gray y slate enteros para que las ~6.000
+        // clases gray-* de la app tomen la estética sin tocar componentes.
+        gray: KB_NEUTROS,
+        slate: KB_NEUTROS,
+        // Los violetas/índigos que estaban escritos a mano pasan al azul de
+        // la marca (celeste #009ffd → azul #2676f5 → índigo #3445d3).
+        violet: KB_AZUL,
+        purple: KB_AZUL,
+        indigo: KB_AZUL,
+        // El rosa era el acento de la marca vieja (Viora) y quedó en botones
+        // y bordes de Producción, login, etc.: también pasa al azul.
+        pink: KB_AZUL,
+        fuchsia: KB_AZUL,
         // Paleta de marca — definida como variables CSS para poder
         // re-tematizarla en runtime desde el panel de Apariencia (el user
         // elige el color de acento de toda la app). Los valores default

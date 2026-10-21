@@ -28,6 +28,7 @@ import WinnerForm from './WinnerForm.jsx';
 import WinnersReport from './WinnersReport.jsx';
 import { iterateFromWinner, generateFromWinner, regenerarReferencial } from './winnerIterate.js';
 import { BarChart3 } from 'lucide-react';
+import { KombialoMark } from './logo.jsx';
 import { SkeletonGrid } from './Skeleton.jsx';
 import EmptyState from './EmptyState.jsx';
 import { getCachedCreativoUrl } from './creativoImgCache.js';
@@ -595,7 +596,7 @@ function GalleryTableView({ items, blobUrls, seleccionados, selectedOrder, onTog
 
 // Carga del creativo en alta (prototipo F+D elegido): mientras baja el
 // original, la miniatura se muestra PIXELADA y se va definiendo por pasos, con
-// el ícono de AdsLab latiendo y frases que rotan. Al terminar, el original
+// el ícono de Kombialo latiendo y frases que rotan. Al terminar, el original
 // aparece nítido con un fundido.
 const FRASES_CARGA = ['Trayendo tu creativo…', 'Ajustando colores…', 'Revisando detalles…', 'Casi listo…'];
 const PASOS_PIXEL = [8, 14, 24, 40, 72];
@@ -651,7 +652,7 @@ function ImagenEnAlta({ src, fallback, size, onImgError }) {
         className={`absolute inset-0 w-full h-full object-contain bg-white transition-opacity duration-500 ${cargada ? 'opacity-100' : 'opacity-0'}`} />
       {!cargada && (
         <div className="absolute inset-0 flex flex-col items-center justify-center gap-2.5 pointer-events-none">
-          <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-brand-500 to-sky-400 flex items-center justify-center text-white font-black text-sm shadow-lg animate-pulse ring-4 ring-brand-500/30">AL</div>
+          <KombialoMark size={48} className="animate-pulse" style={{ borderRadius: 12, boxShadow: '0 0 0 4px rgba(0,159,253,.3), 0 8px 20px -6px rgba(0,0,0,.6)' }} />
           <span className="px-3 py-1 rounded-full bg-gray-950/70 backdrop-blur text-white text-xs font-semibold">{FRASES_CARGA[frase]}</span>
         </div>
       )}

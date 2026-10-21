@@ -407,7 +407,7 @@ export default function TarjetaProduccion({ a, num, personas = [], team = [], on
           <ConfirmDialog
             open
             title={`¿Eliminar la tarjeta de ${a.productoNombre}?`}
-            message="Se pierde su historial y su lista de videos. Los archivos ya subidos a Drive/AdsLab no se borran."
+            message="Se pierde su historial y su lista de videos. Los archivos ya subidos a Drive/Kombialo no se borran."
             confirmLabel="Eliminar tarjeta" tone="danger"
             onConfirm={() => { setConfirmDel(false); removeAssignment(a.id); addToast?.({ type: 'success', message: `Tarjeta de ${a.productoNombre} eliminada.` }); }}
             onClose={() => setConfirmDel(false)}

@@ -2,25 +2,24 @@
 <html lang="es">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/adslab-favicon.svg" />
-    <link rel="apple-touch-icon" href="/adslab-apple-touch.png" />
+    <link rel="icon" type="image/svg+xml" href="/kombialo-favicon.svg" />
+    <link rel="apple-touch-icon" href="/kombialo-apple-touch.png" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-    <meta name="theme-color" content="#7c3aed" media="(prefers-color-scheme: light)" />
-    <meta name="theme-color" content="#5b21b6" media="(prefers-color-scheme: dark)" />
+    <meta name="theme-color" content="#0a0a12" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-    <meta name="apple-mobile-web-app-title" content="AdsLab" />
-    <meta name="description" content="AdsLab — Plataforma de creación de creativos para Meta Ads." />
+    <meta name="apple-mobile-web-app-title" content="Kombialo" />
+    <meta name="description" content="Kombialo — Plataforma de creación de creativos para Meta Ads." />
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Allura&family=Sora:wght@600;700;800&family=Montserrat:wght@300;400;500;600;700&family=Nunito:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-    <title>AdsLab</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Allura&family=Sora:wght@600;700;800&family=Montserrat:wght@300;400;500;600;700&family=Nunito:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <title>Kombialo</title>
     <script>
       // Aplica dark mode + preferencias de apariencia (tamaño, fuente) antes
       // del render para evitar flash de tema/tamaño viejo.
       (function () {
         try {
-          // AdsLab es siempre modo oscuro (se sacó el modo claro).
+          // Kombialo es siempre modo oscuro (se sacó el modo claro).
           document.documentElement.classList.add('dark');
           var de = document.documentElement;
           var sz = localStorage.getItem('dash-text-size') || 'mediano';
@@ -28,8 +27,6 @@
           var font = localStorage.getItem('dash-ui-font');
           if (font === 'montserrat') de.style.fontFamily = "'Montserrat', system-ui, -apple-system, sans-serif";
           else if (font === 'nunito') de.style.fontFamily = "'Nunito', system-ui, -apple-system, sans-serif";
-          var av = localStorage.getItem('dash-accent-vars');
-          if (av) { var o = JSON.parse(av); for (var k in o) de.style.setProperty(k, o[k]); }
         } catch (e) {}
       })();
     </script>

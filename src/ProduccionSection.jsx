@@ -90,7 +90,7 @@ function setVistasTs(ts) {
 
 // Aviso del admin: entregas (videos que subió el equipo) que TODAVÍA NO MIRÓ.
 // En vez de revisar tarjeta por tarjeta buscando qué cambió, ve de una lo nuevo,
-// con "Ver" (abre la tarjeta para mirar/descargar de Drive o AdsLab) y "Marcar
+// con "Ver" (abre la tarjeta para mirar/descargar de Drive o Kombialo) y "Marcar
 // visto". Cuando llega algo nuevo con la app abierta dispara un toast, y una
 // notificación del navegador si el admin activó los avisos (🔔). El "visto" es
 // una marca local por dispositivo (localStorage) — no toca la nube.
@@ -114,7 +114,7 @@ function NovedadesPanel({ onOpen, addToast }) {
       addToast?.({ type: 'info', message: `🆕 ${totalNuevos} entrega${totalNuevos === 1 ? '' : 's'} nueva${totalNuevos === 1 ? '' : 's'} del equipo` });
       if (notifOn && typeof Notification !== 'undefined' && Notification.permission === 'granted') {
         try {
-          new Notification('AdsLab — entregas nuevas', {
+          new Notification('Kombialo — entregas nuevas', {
             body: `${totalNuevos} video${totalNuevos === 1 ? '' : 's'} nuevo${totalNuevos === 1 ? '' : 's'} del equipo. Entrá a Producción para verlos.`,
             tag: 'adslab-entregas',
           });
@@ -219,7 +219,7 @@ function NovedadesPanel({ onOpen, addToast }) {
             <p className="px-4 py-1.5 text-[10px] text-gray-400 dark:text-gray-500">y {resto} tarjeta{resto === 1 ? '' : 's'} más con entregas nuevas…</p>
           )}
           <div className="flex items-center gap-2 px-4 py-2 bg-gray-50 dark:bg-gray-900/40">
-            <span className="text-[10px] text-gray-400 dark:text-gray-500 flex-1">Abrí una tarjeta para mirar o descargar los videos (Drive o AdsLab).</span>
+            <span className="text-[10px] text-gray-400 dark:text-gray-500 flex-1">Abrí una tarjeta para mirar o descargar los videos (Drive o Kombialo).</span>
             {!notifOn ? (
               <button onClick={activarAvisos} className="inline-flex items-center gap-1 text-[11px] font-semibold text-brand-600 dark:text-brand-300 hover:underline">
                 <Bell size={12} /> Activar avisos
@@ -2204,7 +2204,7 @@ function VideoSearchModal({ onClose, addToast }) {
                     )}
                   </>
                 ) : (
-                  <span className="text-[10px] font-bold text-gray-400 bg-gray-100 dark:bg-gray-700 rounded-full px-2 py-1">AdsLab</span>
+                  <span className="text-[10px] font-bold text-gray-400 bg-gray-100 dark:bg-gray-700 rounded-full px-2 py-1">Kombialo</span>
                 )}
               </div>
             </div>
@@ -2808,7 +2808,7 @@ export function CardDetailModal({ a, personas, team = [], onClose, addToast, onT
         <ConfirmDialog
           open={dlg === 'eliminar'}
           title={`¿Eliminar la tarjeta de ${a.productoNombre}?`}
-          message="Se pierde su historial y su lista de videos. Los archivos ya subidos a Drive/AdsLab no se borran."
+          message="Se pierde su historial y su lista de videos. Los archivos ya subidos a Drive/Kombialo no se borran."
           confirmLabel="Eliminar tarjeta" tone="danger"
           onConfirm={() => { setDlg(null); removeAssignment(a.id); onClose(); }}
           onClose={() => setDlg(null)}

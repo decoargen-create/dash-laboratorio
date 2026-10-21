@@ -112,9 +112,9 @@ async function handleConnectUrl(req, res) {
   if (!appId) return respondJSON(res, 500, { error: 'META_APP_ID no configurada. Falta crear la app de Meta y cargar sus credenciales en Vercel.' });
   if (!secret) return respondJSON(res, 500, { error: 'AUTH_SECRET no configurada' });
 
-  // userId de AdsLab — requerido en este flujo (multi-usuario = DB).
+  // userId de Kombialo — requerido en este flujo (multi-usuario = DB).
   const userId = isSupabaseConfigured() ? await getUserIdFromAuth(req) : null;
-  if (!userId) return respondJSON(res, 401, { error: 'Iniciá sesión en AdsLab antes de conectar Meta.' });
+  if (!userId) return respondJSON(res, 401, { error: 'Iniciá sesión en Kombialo antes de conectar Meta.' });
 
   let body = {};
   try {
@@ -230,7 +230,7 @@ async function handleCallback(req, res) {
     return redirectWithError(res, origin, returnTo, `Intercambio de token falló: ${err.message}`);
   }
 
-  // MULTI-USUARIO: si el connect se inició logueado en AdsLab (connect-url),
+  // MULTI-USUARIO: si el connect se inició logueado en Kombialo (connect-url),
   // el state trae el userId → guardamos la conexión en meta_connections a su
   // nombre. Cada colega/cliente conecta su propio Meta. Fallback a cookie
   // (legacy single-user) si no hay userId o falla el insert.
@@ -2437,7 +2437,7 @@ async function handleManagerTable(req, res) {
 }
 
 // ========================================================================
-// PUBLICAR CAMPAÑAS — el lanzador de AdsLab
+// PUBLICAR CAMPAÑAS — el lanzador de Kombialo
 // ========================================================================
 // Crea en Meta una estructura completa de venta a partir de posts existentes
 // (nombre + post id), con las tres recetas del equipo:
@@ -2814,7 +2814,7 @@ async function handleLaunchCampaign(req, res) {
 // Meta devuelve el MISMO error críptico ("Unsupported post request. Object
 // with ID 'act_X' does not exist, cannot be loaded due to missing
 // permissions...") cuando el token puede LEER la cuenta pero no ESCRIBIR —
-// p. ej. una conexión OAuth hecha cuando AdsLab pedía solo ads_read. Lo
+// p. ej. una conexión OAuth hecha cuando Kombialo pedía solo ads_read. Lo
 // traducimos a algo accionable en vez de mandar al usuario a la doc de Graph.
 function traducirErrorMetaEscritura(msg) {
   const m = String(msg || '');
@@ -2966,7 +2966,7 @@ async function handleUploadAdVideos(req, res) {
     try {
       let fileUrl = String(v?.fileUrl || '').trim();
       if (!fileUrl && v?.storagePath) {
-        if (!sb) throw new Error('Supabase no está configurado en el server (SUPABASE_SERVICE_ROLE_KEY) — no puedo firmar archivos de AdsLab');
+        if (!sb) throw new Error('Supabase no está configurado en el server (SUPABASE_SERVICE_ROLE_KEY) — no puedo firmar archivos de Kombialo');
         const { data, error: e } = await sb.storage.from('creativos').createSignedUrl(String(v.storagePath), 3600);
         if (e || !data?.signedUrl) throw new Error(`No pude firmar el archivo (${e?.message || 'sin URL'})`);
         fileUrl = data.signedUrl;

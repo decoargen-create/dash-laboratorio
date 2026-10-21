@@ -2245,7 +2245,7 @@ function VistaReglas({ campaigns, cfg, setCfg, productos, currency, onWhy, orige
           <span className="text-[10.5px] text-gray-400">el que anotás vos para cada producto</span>
         </div>
         <div className="grid md:grid-cols-3 gap-3 p-3.5">
-          {productos.length === 0 && <p className="text-[11px] text-gray-400">No hay productos cargados en AdsLab todavía.</p>}
+          {productos.length === 0 && <p className="text-[11px] text-gray-400">No hay productos cargados en Kombialo todavía.</p>}
           {productos.map(p => {
             const ef = cfgPara(cfg, p.id);
             return (
@@ -2434,7 +2434,7 @@ export default function MetricasSection({ addToast }) {
   // Cambiar de cuenta tira los cambios locales: son de otro tablero.
   useEffect(() => { setCambios({}); }, [accountId]);
 
-  // Prende o pausa en Meta. Es la única acción de AdsLab que le cambia algo a
+  // Prende o pausa en Meta. Es la única acción de Kombialo que le cambia algo a
   // la cuenta publicitaria, así que hace tres cosas que las lecturas no
   // necesitan: marca las filas como "en curso" para que no se pueda clickear
   // dos veces, aplica solo lo que Meta confirmó (si de 5 salieron 3, se
@@ -2579,7 +2579,7 @@ export default function MetricasSection({ addToast }) {
 
   // Filtro por producto sobre los anuncios (las campañas las filtra el core).
   // Solo los productos que REALMENTE tienen campañas en esta cuenta. Mostrar
-  // todos los de AdsLab llenaba la barra de chips que no filtran nada (y que
+  // todos los de Kombialo llenaba la barra de chips que no filtran nada (y que
   // al tocarlos dejaban el tablero vacío). De paso, el número al lado dice
   // cuántas campañas engancha cada uno: es la devolución de si el alias sirve.
   const productosEnCuenta = useMemo(() => {

@@ -13,6 +13,7 @@ import BocetosSection from './Bocetos.jsx';
 import KombialoSeccion, { SECCIONES_KOMBIALO } from './KombialoSeccion.jsx';
 import InicioKombi from './InicioKombi.jsx';
 import EquipoCreativo from './EquipoCreativo.jsx';
+import InspiracionGeneral from './InspiracionGeneral.jsx';
 import CalculadoraPrecios from './CalculadoraPrecios.jsx';
 import MarketingSection from './Marketing.jsx';
 // CompetenciaSection (./Competencia.jsx) fue deprecada — la fuente de verdad
@@ -2307,7 +2308,7 @@ function AppShell({ onExit }) {
     if (currentPlatform !== 'marketing') { setCurrentPlatform('marketing'); return; }
     const SECCIONES_AREA = {
       metricas: ['mk-home', 'mk-metricas', 'mk-escalar'],
-      productos: ['mk-home', 'mk-arranque', 'mk-nueva-carga'],
+      productos: ['mk-home', 'mk-arranque', 'mk-nueva-carga', 'mk-inspiracion'],
       produccion: ['mk-home', 'mk-produccion', 'mk-publicar', 'mk-creativa'],
       landings: ['mk-home', 'mk-landings'],
     };
@@ -2545,6 +2546,7 @@ function AppShell({ onExit }) {
                 <NavSection title="Estáticos" icon={ImageIconKb} sectionKey="mk-estaticos" sidebarOpen={sidebarOpen}>
                   <NavItem sub icon={Plus} label="Nueva carga" section="mk-nueva-carga" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
                   <NavItem sub icon={Play} label="Productos" section="mk-arranque" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
+                  <NavItem sub icon={Sparkles} label="Inspiración" section="mk-inspiracion" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
                 </NavSection>
               )}
               {(!currentUser.miembro || currentUser.miembro.areas.some(a => a === 'produccion' || a === 'landings')) && (
@@ -2673,7 +2675,7 @@ function AppShell({ onExit }) {
           {currentUser.role === 'admin' && currentPlatform === 'marketing' && (supabaseUser || !supabase) && currentSection === 'mk-bandeja' && <BandejaSection addToast={addToast} />}
           {/* mk-competencia (sidebar legacy) está redirigido por el effect
               de arriba a mk-arranque — no necesita su propio render. */}
-          {currentUser.role === 'admin' && currentPlatform === 'marketing' && (supabaseUser || !supabase) && currentSection === 'mk-inspiracion' && <InspiracionSection addToast={addToast} />}
+          {currentUser.role === 'admin' && currentPlatform === 'marketing' && (supabaseUser || !supabase) && currentSection === 'mk-inspiracion' && <InspiracionGeneral addToast={addToast} />}
           {currentUser.role === 'admin' && currentPlatform === 'marketing' && (supabaseUser || !supabase) && currentSection === 'mk-metricas' && <MetricasSection addToast={addToast} />}
           {currentUser.role === 'admin' && currentPlatform === 'marketing' && (supabaseUser || !supabase) && currentSection === 'mk-publicar' && <PublicarSection addToast={addToast} />}
           {currentUser.role === 'admin' && currentPlatform === 'marketing' && (supabaseUser || !supabase) && currentSection === 'mk-testeos' && <TesteosSection addToast={addToast} />}

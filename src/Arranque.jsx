@@ -624,6 +624,7 @@ const FLOW_STEPS = [
   { emoji: '⚙️', tab: null, titulo: 'Nueva carga', desc: 'En Estáticos → Nueva carga: cargás el producto (foto, oferta, formato) y sus competidores.' },
   { emoji: '▶️', tab: null, titulo: 'Analizar y generar ideas', desc: 'Miramos los anuncios ganadores de tu competencia y te armamos ideas.' },
   { emoji: '📥', tab: 'bandeja', titulo: 'Bandeja', desc: 'Revisás cada idea y generás el creativo ahí mismo.' },
+  { emoji: '✨', tab: null, titulo: 'Inspiración', desc: 'En Estáticos → Inspiración: elegís anuncios de referencia de cualquier marca y generás para el producto que quieras.' },
   { emoji: '🖼️', tab: 'galeria', titulo: 'Galería', desc: 'Ves los estáticos generados, listos para descargar.' },
 ];
 
@@ -705,7 +706,6 @@ function ProductTabs({ activeTab, onChange }) {
       label: 'Creación',
       tabs: [
         { id: 'bandeja', label: 'Bandeja', emoji: '📥' },
-        { id: 'inspiracion', label: 'Inspiración', emoji: '✨' },
         // Creativos: oculta por ahora (pedido del user 22/10). La pestaña y
         // su contenido siguen vivos; para volver, descomentar esta línea.
         // { id: 'creativos', label: 'Creativos', emoji: '🎨' },
@@ -1140,7 +1140,7 @@ export default function ArranqueSection({ addToast, onGoToSection, modoAlta = fa
   // Se persiste por producto para que volver al mismo producto te lleve al
   // último tab que estabas viendo.
   const productoTabKey = activeProductoId ? `adslab-marketing-prod-tab-${activeProductoId}` : null;
-  const [productoTab, setProductoTab] = useState('inspiracion');
+  const [productoTab, setProductoTab] = useState('bandeja');
   // Bumpeamos esta key para forzar el remount de la Bandeja embebida cuando
   // el generador rápido inserta ideas — así aparecen sin recargar la página.
   const [bandejaRefreshKey, setBandejaRefreshKey] = useState(0);
@@ -1148,16 +1148,17 @@ export default function ArranqueSection({ addToast, onGoToSection, modoAlta = fa
   // loop vive acá (no en la pestaña Bandeja) para que sobreviva al cambio
   // de pestaña dentro del workspace.
   useEffect(() => {
-    if (!productoTabKey) { setProductoTab('inspiracion'); return; }
+    if (!productoTabKey) { setProductoTab('bandeja'); return; }
     // Tabs retiradas (dashboard, competencia, campañas) caen a 'setup' —
     // competencia vive dentro de Setup; las campañas se ven en Anuncios →
     // Métricas (pedido del user 22/10: estaba de más en el producto).
     // El Setup salió de las pestañas: vive en Estáticos → Nueva carga.
-    const REMOVED = ['dashboard', 'competencia', 'campanas', 'creativos', 'guiones', 'setup'];
+    // Inspiración también salió: es la biblioteca general (Estáticos → Inspiración).
+    const REMOVED = ['dashboard', 'competencia', 'campanas', 'creativos', 'guiones', 'setup', 'inspiracion'];
     try {
-      const saved = localStorage.getItem(productoTabKey) || 'inspiracion';
-      setProductoTab(REMOVED.includes(saved) ? 'inspiracion' : saved);
-    } catch { setProductoTab('inspiracion'); }
+      const saved = localStorage.getItem(productoTabKey) || 'bandeja';
+      setProductoTab(REMOVED.includes(saved) ? 'bandeja' : saved);
+    } catch { setProductoTab('bandeja'); }
   }, [productoTabKey]);
   useEffect(() => {
     if (productoTabKey) try { localStorage.setItem(productoTabKey, productoTab); } catch {}
@@ -1192,7 +1193,7 @@ export default function ArranqueSection({ addToast, onGoToSection, modoAlta = fa
     const onTab = (e) => {
       const tab = e?.detail?.tab;
       // Tabs retiradas caen a 'setup' (competencia ahora vive ahí).
-      if (tab) setProductoTab(['dashboard', 'competencia', 'setup'].includes(tab) ? 'inspiracion' : tab);
+      if (tab) setProductoTab(['dashboard', 'competencia', 'setup', 'inspiracion'].includes(tab) ? 'bandeja' : tab);
     };
     window.addEventListener('viora:product-select', onSelect);
     window.addEventListener('viora:product-tab', onTab);

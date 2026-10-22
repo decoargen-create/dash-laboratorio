@@ -628,6 +628,12 @@ function BrandCard({ brand, ads, isScraping, adaptingAdIds, creandoAdIds, selecc
                 comp
               </span>
             )}
+            {brand.__origen && (
+              <span className="px-1.5 py-px text-[9px] font-semibold bg-gray-100 dark:bg-gray-700/70 text-gray-500 dark:text-gray-300 rounded shrink-0 truncate max-w-[120px]"
+                title={`Cargada en ${brand.__origen}`}>
+                de {brand.__origen}
+              </span>
+            )}
             {(() => {
               // Badge "estable" — marcas que el smart scrape va a saltear porque
               // devolvieron 0 ads nuevos 3 veces seguidas. El user puede forzar
@@ -1468,7 +1474,7 @@ function TopTableView({ items, seleccionados, selectedOrder, adaptingAdIds, crea
 
 
 
-export default function InspiracionSection({ addToast, forcedProductoId, embedded = false }) {
+export default function InspiracionSection({ addToast, forcedProductoId, embedded = false, biblioteca = false }) {
   // Refs de cleanup — guards contra setState en componente desmontado,
   // doble-click en bulk generate, y setTimeouts sin cancel al unmount.
   // Sin esto se filtraban warnings de React + memoria de timeouts colgados
@@ -1593,6 +1599,40 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
   // localStorage pero rompía quota con muchos ads. Ahora se hidratan desde
   // IDB (competidorAdsIDB) cuando el producto se monta o cambia.
   const [compAdsByCompId, setCompAdsByCompId] = useState({});
+
+  // BIBLIOTECA GENERAL (Estáticos → Inspiración): además de las marcas del
+  // producto elegido, se muestran las de TODOS los otros productos. No se
+  // mueve ningún dato: cada marca sigue guardada en el producto donde se
+  // cargó, y lo que se genera va al producto elegido en "Generar para".
+  const [ajenas, setAjenas] = useState([]);
+  const otrosKey = biblioteca ? productos.filter(p => String(p.id) !== String(activeProductoId))
+    .map(p => `${p.id}:${(p.competidores || []).length}`).join('|') : '';
+  useEffect(() => {
+    if (!biblioteca) { setAjenas([]); return; }
+    let cancelled = false;
+    (async () => {
+      const out = [];
+      for (const p of productos) {
+        if (String(p.id) === String(activeProductoId)) continue;
+        const origen = p.nombre || 'otro producto';
+        for (const c of (p.competidores || [])) {
+          const rec = await getCompAds(p.id, c.id);
+          out.push({ key: `x-${p.id}-c-${c.id}`, nombre: c.nombre, landingUrl: c.landingUrl, fbPageUrl: c.fbPageUrl,
+            lastScraped: c.lastAdsCheck, isCompetidor: true, origen, ads: rec?.ads?.length ? rec.ads : (c.ads || []) });
+        }
+        for (const b of loadBrands(p.id)) {
+          const rec = await getCompAds(p.id, `brand-${b.id}`);
+          out.push({ key: `x-${p.id}-b-${b.id}`, nombre: b.nombre, landingUrl: b.landingUrl, fbPageUrl: b.fbPageUrl,
+            lastScraped: b.lastScraped, isCompetidor: false, origen, ads: rec?.ads || [] });
+        }
+      }
+      if (!cancelled) setAjenas(out);
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [biblioteca, activeProductoId, otrosKey]);
+  // Ads de las marcas de otros productos, en el formato que usa el bulk.
+  const adsDeAjenas = () => ajenas.flatMap(f => (f.ads || []).map(ad => ({ brandNombre: f.nombre, ad })));
 
   // Hidratar ads de competidores desde IDB.
   // - PRIORITY: IDB primero, inline legacy solo si IDB vacía.
@@ -2658,7 +2698,7 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
         .filter(a => seleccionados.has(a.id))
         .map(a => ({ brandNombre, ad: a }));
     });
-    adsAGenerarRaw.push(...adsCompetidores, ...adsCustom);
+    adsAGenerarRaw.push(...adsCompetidores, ...adsCustom, ...adsDeAjenas().filter(x => seleccionados.has(x.ad.id)));
     // Dedupe por ad.id (mismo motivo que en handleBulkCrear: un ad puede
     // matchear en dos fuentes y se adaptaría/gastaría 2 veces).
     const vistosAdapt = new Set();
@@ -2778,6 +2818,7 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
       for (const lista of Object.values(adsByBrand)) {
         for (const a of (lista || [])) if (seleccionados.has(a.id)) selAds.push(a);
       }
+      for (const { ad } of adsDeAjenas()) if (seleccionados.has(ad.id)) selAds.push(ad);
       mismCount = selAds.filter(a => checkAdProductMismatch(producto, a).mismatch).length;
     } catch {}
     // Confirmación con el modal propio (BulkConfirmModal, diseño Panel) en
@@ -2830,7 +2871,8 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
         .filter(a => seleccionados.has(a.id))
         .map(a => ({ brandNombre, ad: a }));
     });
-    adsAGenerarRaw.push(...adsCompetidores, ...adsCustom);
+    adsAGenerarRaw.push(...adsCompetidores, ...adsCustom,
+      ...adsDeAjenas().filter(x => seleccionados.has(x.ad.id) && (x.ad.imageUrls?.length || 0) > 0));
 
     // DEDUPE por ad.id — CAUSA RAÍZ del runaway. Un mismo ad puede matchear
     // en dos lados: el mismo ad scrapeado bajo dos competidores, o presente en
@@ -3866,6 +3908,21 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
           return true;
         });
         let unif = [...competidoresUnif, ...customDeduped];
+        if (biblioteca && ajenas.length) {
+          const hostDe = (u) => (u || '').replace(/^https?:\/\//, '').replace(/^www\./, '').split('/')[0];
+          const vistos = new Set(unif.flatMap(b => [hostDe(b.landingUrl), (b.nombre || '').toLowerCase().trim()]).filter(Boolean));
+          for (const f of ajenas) {
+            const h = hostDe(f.landingUrl); const n = (f.nombre || '').toLowerCase().trim();
+            if ((h && vistos.has(h)) || (n && vistos.has(n))) continue;
+            if (h) vistos.add(h); if (n) vistos.add(n);
+            const staticAds = (f.ads || []).filter(a =>
+              (a.imageUrls?.length || 0) > 0 && (a.videoUrls?.length || 0) === 0
+              && (!soloProbados || a.daysRunning == null || a.daysRunning >= MIN_DAYS_PROBADO));
+            unif.push({ id: f.key, nombre: f.nombre, landingUrl: f.landingUrl, fbPageUrl: f.fbPageUrl,
+              lastScraped: f.lastScraped, isCompetidor: f.isCompetidor, __ads: dedupAdsByImage(staticAds),
+              __origen: f.origen, __ajena: true });
+          }
+        }
 
         // Filtros
         if (tipoFiltro === 'competidor') unif = unif.filter(b => b.isCompetidor);
@@ -4216,13 +4273,14 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
                   derivadas de producto.competidores via el useEffect de sync. */}
               <button
                 onClick={() => {
+                  if (biblioteca) { setShowAddForm(true); return; }
                   try { window.dispatchEvent(new CustomEvent('viora:product-tab', { detail: { tab: 'setup' } })); } catch {}
                   addToast?.({ type: 'info', message: 'Cargá la marca como competidor — va a aparecer acá automático.' });
                 }}
                 className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-bold text-white bg-gradient-to-br from-amber-500 to-brand-500 rounded hover:from-amber-600 hover:to-brand-600 shadow-sm transition"
                 title="Las marcas se agregan desde Competencia. Click para ir."
               >
-                <Plus size={11} /> Marca (en Competencia)
+                <Plus size={11} /> {biblioteca ? 'Agregar marca' : 'Marca (en Competencia)'}
               </button>
             </div>
 
@@ -4255,14 +4313,16 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
                     selectedOrder={selectedOrder}
                     usedAdIds={mergedUsedAdIds}
                     progressById={progressById}
-                    onScrape={() => b.isCompetidor ? handleScrapeCompetidor(b) : handleScrapeBrand(b)}
+                    onScrape={() => (b.__ajena
+                      ? addToast?.({ type: 'info', message: `Esta marca se actualiza desde ${b.__origen}: elegilo en "Generar para" y scrapeala.` })
+                      : b.isCompetidor ? handleScrapeCompetidor(b) : handleScrapeBrand(b))}
                     onOcrWinners={() => handleOcrTopWinners(b)}
                     onTranscribeVideos={() => handleTranscribeTopVideos(b)}
                     onAdapt={(ad) => handleAdapt(b.nombre, ad)}
                     onCrearReferencial={(ad) => crearReferencialDeAd(b.nombre, ad)}
                     onToggleSelect={(adId) => toggleSeleccion(adId)}
                     onSaveToBoard={(ad, brandInfo) => setBoardPickerData({ ad, brand: brandInfo, productoId: producto.id })}
-                    onRemove={b.isCompetidor ? null : () => handleRemoveBrand(b.id)}
+                    onRemove={b.isCompetidor || b.__ajena ? null : () => handleRemoveBrand(b.id)}
                     onClearProgress={(adId) => setProgressById(prev => {
                       const next = { ...prev }; delete next[adId]; return next;
                     })}

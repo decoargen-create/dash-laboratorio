@@ -30,6 +30,7 @@
     "api/marketing/creativos-thumbs.js": { "maxDuration": 60 },
     "api/marketing/ads-imagenes.js": { "maxDuration": 60 },
     "api/marketing/ocr-ad.js": { "maxDuration": 180 },
+    "api/marketing/detectar-formato.js": { "maxDuration": 60 },
     "api/marketing/transcribe-ad.js": { "maxDuration": 240 },
     "api/marketing/referencias.js": { "maxDuration": 300 },
     "api/marketing/transcribir-video.js": { "maxDuration": 240 },

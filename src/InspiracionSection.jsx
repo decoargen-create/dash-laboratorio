@@ -27,7 +27,7 @@ import {
   Sparkles, Package, ChevronRight, ChevronDown, Plus, Trash2, Link2, X,
   Loader2, Download, Image as ImageIcon, ExternalLink, Wand2, Search,
   Check, AlertCircle, LayoutGrid, Rows3, Columns3, Table2, Settings2, RefreshCw,
-  Inbox, Bookmark,
+  Inbox, Bookmark, AlertTriangle,
 } from 'lucide-react';
 import { logCostsFromResponse } from './costsStore.js';
 import { authHeaders } from './authFetch.js';
@@ -608,6 +608,8 @@ function dedupAdsByImage(ads) {
 }
 
 function BrandCard({ brand, ads, isScraping, adaptingAdIds, creandoAdIds, seleccionados, selectedOrder, usedAdIds, progressById, onScrape, onAdapt, onCrearReferencial, onToggleSelect, onSaveToBoard, onRemove, onClearProgress, onOcrWinners, onTranscribeVideos }) {
+  const estados = useImgEstado();
+  const vencidas = ads.reduce((n, a) => n + (estados.get(a.id) === 'vencida' ? 1 : 0), 0);
   // onClearProgress se forwardea a BrandAdsGrid (que lo pasa a AdThumb) para
   // que el user pueda cerrar el overlay de error que ahora queda persistente.
   const isCompetidor = !!brand.isCompetidor;
@@ -696,7 +698,7 @@ function BrandCard({ brand, ads, isScraping, adaptingAdIds, creandoAdIds, selecc
             onClick={onScrape}
             disabled={isScraping}
             className="inline-flex items-center gap-1 px-2 py-1 text-[10px] font-bold text-white bg-gradient-to-br from-amber-500 to-brand-500 rounded hover:from-amber-600 hover:to-brand-600 transition disabled:opacity-50 shrink-0"
-            title={brand.lastScraped ? 'Volver a scrapear' : 'Scrapear ads'}
+            title={`${brand.lastScraped ? 'Volver a scrapear' : 'Scrapear anuncios'} · cuesta ≈ ${fmtUsd(costoScrape(ads.length))} de Apify`}
           >
             {isScraping
               ? <><Loader2 size={10} className="animate-spin" /> Scrapeando…</>
@@ -724,6 +726,18 @@ function BrandCard({ brand, ads, isScraping, adaptingAdIds, creandoAdIds, selecc
             ? 'Sin estáticos activos en la biblioteca de anuncios en el último scrape.'
             : 'Todavía no se scrapeó — tocá Scrape para traer sus anuncios.'}
         </p>
+      )}
+
+      {vencidas > 0 && (
+        <button onClick={onScrape} disabled={isScraping}
+          className="mt-3 w-full flex items-center gap-2 rounded-lg border border-amber-400/40 bg-amber-500/10 px-3 py-2 text-left text-[12px] text-amber-200 hover:bg-amber-500/15 transition disabled:opacity-60"
+          title="Meta vence los links de imagen a las semanas. Re-scrapear trae links nuevos y desde ahora quedan guardados.">
+          <AlertTriangle size={14} className="shrink-0 text-amber-300" />
+          <span className="flex-1">
+            <b>{vencidas} imagen{vencidas === 1 ? '' : 'es'} vencida{vencidas === 1 ? '' : 's'}.</b>{' '}
+            {brand.__ajena ? `Re-scrapeala desde ${brand.__origen}` : 'Re-scrapeá para traerlas'} · cuesta ≈ {fmtUsd(costoScrape(ads.length))}
+          </span>
+        </button>
       )}
 
       {/* Grilla de estáticos scrapeados */}
@@ -761,6 +775,56 @@ function BrandCard({ brand, ads, isScraping, adaptingAdIds, creandoAdIds, selecc
 // (URL genuinamente expirada), recién ahí escondemos. Sin esto las miniaturas
 // de ads viejos/inactivos salían todas negras.
 // Orden de fuentes: copia guardada (no vence) → CDN de Meta → proxy → nada.
+// Estado de las imágenes de la biblioteca: adId → 'ok' | 'vencida'. Lo leen
+// la barra de progreso y cada miniatura (placeholder "Imagen vencida").
+const imgEstado = new Map();
+const imgSubs = new Set();
+function marcarImg(adId, estado) {
+  if (!adId || imgEstado.get(adId) === estado) return;
+  imgEstado.set(adId, estado);
+  imgSubs.forEach(fn => { try { fn(); } catch { /* listener roto */ } });
+}
+function useImgEstado() {
+  const [, force] = useState(0);
+  useEffect(() => {
+    let t = null;
+    const fn = () => { if (!t) t = setTimeout(() => { t = null; force(x => x + 1); }, 250); };
+    imgSubs.add(fn);
+    return () => { imgSubs.delete(fn); if (t) clearTimeout(t); };
+  }, []);
+  return imgEstado;
+}
+
+// Barra de progreso de la biblioteca: cuántas imágenes ya cargaron, cuántas
+// están vencidas (link de Meta caído, hay que re-scrapear) y cuántas faltan
+// (se cargan al bajar/deslizar).
+function ProgresoImagenes({ ads, cargandoMarcas }) {
+  const estados = useImgEstado();
+  const total = ads.length;
+  let ok = 0, vencidas = 0;
+  for (const a of ads) { const e = estados.get(a.id); if (e === 'ok') ok++; else if (e === 'vencida') vencidas++; }
+  if (!total && !cargandoMarcas) return null;
+  const pct = total ? Math.round(((ok + vencidas) / total) * 100) : 0;
+  const listo = total > 0 && ok + vencidas >= total;
+  return (
+    <div className="rounded-xl border border-[rgba(130,180,255,0.18)] bg-[#10101b] px-3.5 py-2.5">
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[12.5px]">
+        <span className="font-semibold text-gray-200">
+          {cargandoMarcas ? 'Trayendo todas las marcas…' : listo ? 'Biblioteca cargada' : 'Cargando imágenes…'}
+        </span>
+        <span className="text-gray-400 tabular-nums">{ok} de {total} cargadas</span>
+        {vencidas > 0 && <span className="text-amber-300 tabular-nums">{vencidas} vencidas (hay que re-scrapear su marca)</span>}
+        {!listo && total > 0 && <span className="text-gray-500">el resto carga a medida que bajás o deslizás</span>}
+      </div>
+      <div className="mt-2 h-1.5 rounded-full bg-[rgba(160,160,220,0.08)] overflow-hidden flex">
+        <div className="h-full bg-gradient-to-r from-brand-500 to-brand-700 transition-all duration-500" style={{ width: `${total ? (ok / total) * 100 : 0}%` }} />
+        <div className="h-full bg-amber-400/70 transition-all duration-500" style={{ width: `${total ? (vencidas / total) * 100 : 0}%` }} />
+      </div>
+      <span className="sr-only">{pct}%</span>
+    </div>
+  );
+}
+
 function handleAdImgError(e, cdnUrl) {
   const img = e.currentTarget;
   if (img.dataset.guardada === '1' && !img.dataset.step && cdnUrl) {
@@ -771,11 +835,13 @@ function handleAdImgError(e, cdnUrl) {
     img.src = `/api/marketing/proxy-image?url=${encodeURIComponent(cdnUrl)}`;
   } else {
     img.style.display = 'none';
+    marcarImg(img.dataset.adid, 'vencida');
   }
 }
 // Si se vio desde Meta (no desde la copia), se manda a guardar la copia.
 function handleAdImgLoad(e, adId, cdnUrl) {
   const img = e.currentTarget;
+  marcarImg(adId, 'ok');
   if (img.dataset.guardada !== '1' || img.dataset.step) pedirGuardarImagenAd(adId, cdnUrl);
 }
 
@@ -827,6 +893,8 @@ function AdThumb({ ad, brandNombre, brandId = null, isCompetidor = false, fresh 
     };
   }, [ad?.id]);
   const guardada = cachedUrl ? null : (ad.storedImageUrl || urlImagenGuardada(ad.id));
+  const estados = useImgEstado();
+  const vencida = estados.get(ad.id) === 'vencida';
   const thumb = cachedUrl || guardada || cdnThumb;
   return (
     <div
@@ -851,12 +919,19 @@ function AdThumb({ ad, brandNombre, brandId = null, isCompetidor = false, fresh 
     >
       {thumb ? (
         <img key={thumb} src={thumb} alt="" className="w-full h-full object-cover"
-          loading="lazy" decoding="async" data-guardada={guardada ? '1' : undefined}
-          onLoad={(e) => { if (!cachedUrl && cdnThumb) handleAdImgLoad(e, ad.id, cdnThumb); }}
+          loading="lazy" decoding="async" data-guardada={guardada ? '1' : undefined} data-adid={ad.id}
+          onLoad={(e) => { if (!cachedUrl && cdnThumb) handleAdImgLoad(e, ad.id, cdnThumb); else marcarImg(ad.id, 'ok'); }}
           onError={(e) => handleAdImgError(e, cdnThumb)} />
       ) : (
         <div className="w-full h-full flex items-center justify-center">
           <ImageIcon size={20} className="text-gray-300" />
+        </div>
+      )}
+      {vencida && (
+        <div className="absolute inset-0 flex flex-col items-center justify-center gap-1 p-2 text-center bg-[#12121c] pointer-events-none">
+          <ImageIcon size={18} className="text-gray-500" />
+          <span className="text-[10.5px] font-semibold text-gray-400 leading-tight">Imagen vencida</span>
+          <span className="text-[9.5px] text-gray-500 leading-tight">Re-scrapeá la marca para traerla de nuevo</span>
         </div>
       )}
       {/* Indicador de imagen cacheada localmente — solo on-hover para no
@@ -932,20 +1007,18 @@ function AdThumb({ ad, brandNombre, brandId = null, isCompetidor = false, fresh 
           "Crear creativo" grande al centro y las acciones secundarias como
           íconos abajo. En mobile (sin hover) se ven siempre, con degradé. */}
       <div className="absolute inset-0 bg-black/0 group-hover/thumb:bg-black/65 max-md:bg-gradient-to-t max-md:from-black/70 max-md:to-transparent transition flex flex-col items-center justify-center gap-2 p-2">
-        {onCrearReferencial && (
-          <button
-            onClick={(e) => { e.preventDefault(); e.stopPropagation(); onCrearReferencial(); }}
-            disabled={creando}
-            className="opacity-0 group-hover/thumb:opacity-100 max-md:opacity-100 transition inline-flex items-center justify-center gap-1.5 px-3 py-2 text-[11.5px] font-bold text-white bg-gradient-to-b from-brand-500 to-brand-700 rounded-[9px] shadow-lg disabled:opacity-70"
-            title="Genera variaciones con tu producto real"
-          >
-            {creando
-              ? <><Loader2 size={12} className="animate-spin" /> Generando…</>
-              : <><Sparkles size={12} /> Crear creativo</>
-            }
-          </button>
-        )}
         <div className="absolute bottom-1.5 left-1.5 right-1.5 flex items-center justify-center gap-1 opacity-0 group-hover/thumb:opacity-100 max-md:opacity-100 transition">
+          {onCrearReferencial && (
+            <button
+              onClick={(e) => { e.preventDefault(); e.stopPropagation(); onCrearReferencial(); }}
+              disabled={creando}
+              className="h-7 inline-flex items-center gap-1 px-2.5 rounded-full text-[11px] font-bold text-white whitespace-nowrap bg-gradient-to-b from-brand-500 to-brand-700 shadow disabled:opacity-70"
+              title="Crear un creativo con tu producto basado en este anuncio"
+            >
+              {creando ? <Loader2 size={11} className="animate-spin" /> : <Sparkles size={11} />}
+              {creando ? 'Creando' : 'Crear'}
+            </button>
+          )}
           {onAdapt && (
             <button
               onClick={(e) => { e.preventDefault(); e.stopPropagation(); onAdapt(); }}
@@ -1006,6 +1079,9 @@ function AdThumb({ ad, brandNombre, brandId = null, isCompetidor = false, fresh 
 
 
 const VistaCarrilCtx = React.createContext(false);
+const APIFY_USD_POR_AD = 0.0058;
+const costoScrape = (nAds) => Math.max(20, Math.min(500, nAds || 0)) * APIFY_USD_POR_AD;
+const fmtUsd = (v) => `US$ ${v.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 // Biblioteca general: última carga de las fuentes de TODOS los productos.
 // Vive a nivel módulo para que cambiar "Crear para" no la vacíe y recargue.
 let bibliotecaCache = { key: '', fuentes: [] };
@@ -4050,6 +4126,7 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
               />
             )}
 
+            {biblioteca && <ProgresoImagenes ads={unif.flatMap(b => (b.__ads || []).slice(0, 30))} cargandoMarcas={cargandoBiblio} />}
             {biblioteca && (() => {
               const origenes = [...new Set([...ajenas.map(f => f.origen), producto.nombre].filter(Boolean))];
               const chip = (on) => `px-3.5 py-1.5 rounded-full border text-[12.5px] font-semibold transition ${on

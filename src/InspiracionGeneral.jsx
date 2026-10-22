@@ -14,8 +14,15 @@ import InspiracionSection from './InspiracionSection.jsx';
 const PRODUCTOS_KEY = 'adslab-marketing-productos-v1';
 const AYUDA_KEY = 'adslab-inspiracion-ayuda-cerrada';
 
+// Orden estable (por fecha de alta): la sincronización reordena el array
+// guardado por "último modificado", y si la base de la biblioteca cambiaba,
+// la pantalla entera se rearmaba sola (volvía arriba y recargaba todo).
+const fechaAlta = (p) => Date.parse(p.createdAt || p.created_at || 0) || 0;
 function leerProductos() {
-  try { return soloVisibles(JSON.parse(localStorage.getItem(PRODUCTOS_KEY) || '[]')); } catch { return []; }
+  try {
+    return soloVisibles(JSON.parse(localStorage.getItem(PRODUCTOS_KEY) || '[]'))
+      .sort((a, b) => fechaAlta(a) - fechaAlta(b) || String(a.id).localeCompare(String(b.id)));
+  } catch { return []; }
 }
 
 const PASOS = [
@@ -31,7 +38,10 @@ export default function InspiracionGeneral({ addToast }) {
     try { return localStorage.getItem(AYUDA_KEY) !== '1'; } catch { return true; }
   });
   useEffect(() => {
-    const recargar = () => setProductos(leerProductos());
+    const recargar = () => {
+      const nuevos = leerProductos();
+      setProductos(prev => (JSON.stringify(prev.map(p => [p.id, p.nombre])) === JSON.stringify(nuevos.map(p => [p.id, p.nombre])) ? prev : nuevos));
+    };
     window.addEventListener('viora:marketing-pulled', recargar);
     window.addEventListener('viora:marketing-storage-changed', recargar);
     return () => {

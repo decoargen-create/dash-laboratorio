@@ -1687,9 +1687,13 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
   // de una sola vez y en paralelo: la biblioteca es la misma elija el
   // producto que elija. Las del producto elegido se reemplazan después por
   // sus versiones "vivas" (re-scrape, borrar) al armar la lista.
+  // Firma de qué fuentes hay: independiente del ORDEN de los productos (la
+  // sincronización los reordena y eso disparaba una recarga completa).
   const bibKey = biblioteca ? productos.filter(productoVisible)
-    .map(p => `${p.id}:${(p.competidores || []).map(c => c.id).join(',')}:${loadBrands(p.id).length}`).join('|') : '';
-  const [ajenas, setAjenas] = useState(() => (biblioteca && bibliotecaCache.key === bibKey ? bibliotecaCache.fuentes : []));
+    .map(p => `${p.id}:${(p.competidores || []).map(c => c.id).sort().join(',')}:${loadBrands(p.id).length}`).sort().join('|') : '';
+  // Si la biblioteca ya se cargó antes (aunque haya cambiado algo), arranca
+  // mostrando lo que tenía mientras se actualiza: nunca vuelve a quedar vacía.
+  const [ajenas, setAjenas] = useState(() => (biblioteca ? bibliotecaCache.fuentes : []));
   const [cargandoBiblio, setCargandoBiblio] = useState(false);
   // Filtros en chips de la biblioteca (prototipo 2A): de qué producto vino la
   // marca y solo anuncios que ya llevan +30 días activos (probados).

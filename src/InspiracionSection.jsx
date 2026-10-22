@@ -609,7 +609,7 @@ function dedupAdsByImage(ads) {
 
 function BrandCard({ brand, ads, isScraping, adaptingAdIds, creandoAdIds, seleccionados, selectedOrder, usedAdIds, progressById, onScrape, onAdapt, onCrearReferencial, onToggleSelect, onSaveToBoard, onRemove, onClearProgress, onOcrWinners, onTranscribeVideos }) {
   const estados = useImgEstado();
-  const vencidas = ads.reduce((n, a) => n + (estados.get(a.id) === 'vencida' ? 1 : 0), 0);
+  const vencidas = brand.__vencidas ?? ads.reduce((n, a) => n + (estados.get(a.id) === 'vencida' ? 1 : 0), 0);
   // onClearProgress se forwardea a BrandAdsGrid (que lo pasa a AdThumb) para
   // que el user pueda cerrar el overlay de error que ahora queda persistente.
   const isCompetidor = !!brand.isCompetidor;
@@ -784,43 +784,41 @@ function marcarImg(adId, estado) {
   imgEstado.set(adId, estado);
   imgSubs.forEach(fn => { try { fn(); } catch { /* listener roto */ } });
 }
-function useImgEstado() {
+function useImgEstado(cadaMs = 250) {
   const [, force] = useState(0);
   useEffect(() => {
     let t = null;
-    const fn = () => { if (!t) t = setTimeout(() => { t = null; force(x => x + 1); }, 250); };
+    const fn = () => { if (!t) t = setTimeout(() => { t = null; force(x => x + 1); }, cadaMs); };
     imgSubs.add(fn);
     return () => { imgSubs.delete(fn); if (t) clearTimeout(t); };
-  }, []);
+  }, [cadaMs]);
   return imgEstado;
 }
 
-// Barra de progreso de la biblioteca: cuántas imágenes ya cargaron, cuántas
-// están vencidas (link de Meta caído, hay que re-scrapear) y cuántas faltan
-// (se cargan al bajar/deslizar).
-function ProgresoImagenes({ ads, cargandoMarcas }) {
-  const estados = useImgEstado();
-  const total = ads.length;
-  let ok = 0, vencidas = 0;
-  for (const a of ads) { const e = estados.get(a.id); if (e === 'ok') ok++; else if (e === 'vencida') vencidas++; }
-  if (!total && !cargandoMarcas) return null;
-  const pct = total ? Math.round(((ok + vencidas) / total) * 100) : 0;
-  const listo = total > 0 && ok + vencidas >= total;
+// Estado de la biblioteca (reemplaza a la barra de progreso: las imágenes de
+// abajo cargan recién al llegar a ellas, así que una barra "de carga" nunca
+// terminaba). Mientras trae las marcas lo dice; después, solo avisa si hay
+// imágenes vencidas y deja ocultarlas.
+function EstadoBiblioteca({ cargandoMarcas, vencidas, ocultas, onToggleOcultas }) {
+  if (cargandoMarcas) {
+    return (
+      <div className="inline-flex items-center gap-2 text-[12.5px] text-gray-400">
+        <Loader2 size={13} className="animate-spin" /> Trayendo todas las marcas…
+      </div>
+    );
+  }
+  if (!vencidas) return null;
   return (
-    <div className="rounded-xl border border-[rgba(130,180,255,0.18)] bg-[#10101b] px-3.5 py-2.5">
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[12.5px]">
-        <span className="font-semibold text-gray-200">
-          {cargandoMarcas ? 'Trayendo todas las marcas…' : listo ? 'Biblioteca cargada' : 'Cargando imágenes…'}
-        </span>
-        <span className="text-gray-400 tabular-nums">{ok} de {total} cargadas</span>
-        {vencidas > 0 && <span className="text-amber-300 tabular-nums">{vencidas} vencidas (hay que re-scrapear su marca)</span>}
-        {!listo && total > 0 && <span className="text-gray-500">el resto carga a medida que bajás o deslizás</span>}
-      </div>
-      <div className="mt-2 h-1.5 rounded-full bg-[rgba(160,160,220,0.08)] overflow-hidden flex">
-        <div className="h-full bg-gradient-to-r from-brand-500 to-brand-700 transition-all duration-500" style={{ width: `${total ? (ok / total) * 100 : 0}%` }} />
-        <div className="h-full bg-amber-400/70 transition-all duration-500" style={{ width: `${total ? (vencidas / total) * 100 : 0}%` }} />
-      </div>
-      <span className="sr-only">{pct}%</span>
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-xl border border-amber-400/30 bg-amber-500/[0.07] px-3.5 py-2.5 text-[12.5px]">
+      <AlertTriangle size={14} className="text-amber-300 shrink-0" />
+      <span className="flex-1 min-w-[220px] text-amber-100/90">
+        <b className="text-amber-200">{vencidas} anuncio{vencidas === 1 ? '' : 's'} con la imagen vencida.</b>{' '}
+        Meta borra las imágenes a las semanas; para recuperarlas, actualizá su marca (lo dice en cada tarjeta).
+      </span>
+      <button onClick={onToggleOcultas}
+        className="px-3 py-1.5 rounded-lg border border-amber-400/40 text-amber-200 font-semibold hover:bg-amber-500/10 transition">
+        {ocultas ? 'Mostrar vencidas' : 'Ocultar vencidas'}
+      </button>
     </div>
   );
 }
@@ -1701,6 +1699,11 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
   });
   useEffect(() => { try { localStorage.setItem('adslab-inspiracion-vista', vistaMarcas); } catch { /* sin storage */ } }, [vistaMarcas]);
   const [min30, setMin30] = useState(false);
+  // La pantalla entera se redibuja como mucho cada 1,5 s por cambios de imagen
+  // (las miniaturas se actualizan solas al instante). Las vencidas NO se
+  // ocultan por defecto: sacarlas a medida que fallan hacía saltar la grilla.
+  const estadosImg = useImgEstado(1500);
+  const [ocultarVencidas, setOcultarVencidas] = useState(false);
   useEffect(() => {
     if (!biblioteca) { setAjenas([]); return; }
     if (bibliotecaCache.key === bibKey && bibliotecaCache.fuentes.length) { setAjenas(bibliotecaCache.fuentes); return; }
@@ -4037,6 +4040,16 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
         } else {
           unif = [...competidoresUnif, ...customDeduped].map(b => (biblioteca ? { ...b, __origen: b.__origen || producto.nombre } : b));
         }
+        // Imágenes vencidas: se cuentan por marca y, si está activado, se ocultan.
+        let vencidasTotal = 0;
+        if (biblioteca) {
+          unif = unif.map(b => {
+            const v = (b.__ads || []).filter(a => estadosImg.get(a.id) === 'vencida');
+            vencidasTotal += v.length;
+            if (!v.length) return b;
+            return { ...b, __vencidas: v.length, __ads: ocultarVencidas ? b.__ads.filter(a => estadosImg.get(a.id) !== 'vencida') : b.__ads };
+          });
+        }
         // Chips de la biblioteca: origen y +30 días
         if (biblioteca && origenFiltro !== 'todas') unif = unif.filter(b => b.__origen === origenFiltro);
         if (biblioteca && min30) {
@@ -4127,7 +4140,8 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
               />
             )}
 
-            {biblioteca && <ProgresoImagenes ads={unif.flatMap(b => (b.__ads || []).slice(0, 30))} cargandoMarcas={cargandoBiblio} />}
+            {biblioteca && <EstadoBiblioteca cargandoMarcas={cargandoBiblio} vencidas={vencidasTotal}
+              ocultas={ocultarVencidas} onToggleOcultas={() => setOcultarVencidas(v => !v)} />}
             {biblioteca && (() => {
               const origenes = [...new Set([...ajenas.map(f => f.origen), producto.nombre].filter(Boolean))];
               const chip = (on) => `px-3.5 py-1.5 rounded-full border text-[12.5px] font-semibold transition ${on
@@ -4136,7 +4150,6 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
               return (
                 <div className="flex flex-wrap items-center gap-2">
                   <button className={chip(origenFiltro === 'todas')} onClick={() => setOrigenFiltro('todas')} title="Muestra las marcas de todos tus productos">Todas las marcas</button>
-                  {cargandoBiblio && <span className="inline-flex items-center gap-1.5 text-[12px] text-gray-400"><Loader2 size={12} className="animate-spin" /> Trayendo todas las marcas…</span>}
                   {origenes.map(o => (
                     <button key={o} className={chip(origenFiltro === o)} onClick={() => setOrigenFiltro(origenFiltro === o ? 'todas' : o)}
                       title={`Marcas cargadas en ${o}`}>

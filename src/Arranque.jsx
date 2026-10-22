@@ -597,7 +597,7 @@ const FLOW_STEPS = [
   { emoji: '⚙️', tab: 'setup', titulo: 'Setup', desc: 'Cargá el producto (foto, oferta) y sus competidores.' },
   { emoji: '▶️', tab: null, titulo: 'Analizar y generar ideas', desc: 'Miramos los anuncios ganadores de tu competencia y te armamos ideas.' },
   { emoji: '📥', tab: 'bandeja', titulo: 'Bandeja', desc: 'Revisás cada idea y generás el creativo ahí mismo.' },
-  { emoji: '🎨', tab: 'creativos', titulo: 'Creativos', desc: 'Ves los estáticos generados, listos para descargar.' },
+  { emoji: '🖼️', tab: 'galeria', titulo: 'Galería', desc: 'Ves los estáticos generados, listos para descargar.' },
 ];
 
 function FlowGuide() {
@@ -683,7 +683,8 @@ function ProductTabs({ activeTab, onChange }) {
         // Creativos: oculta por ahora (pedido del user 22/10). La pestaña y
         // su contenido siguen vivos; para volver, descomentar esta línea.
         // { id: 'creativos', label: 'Creativos', emoji: '🎨' },
-        { id: 'guiones', label: 'Guiones IA', emoji: '🎬' },
+        // Guiones IA: oculta por ahora (pedido del user 22/10), igual que Creativos.
+        // { id: 'guiones', label: 'Guiones IA', emoji: '🎬' },
         { id: 'galeria', label: 'Galería', emoji: '🖼️' },
       ],
     },
@@ -1125,7 +1126,7 @@ export default function ArranqueSection({ addToast, onGoToSection, modoAlta = fa
     // Tabs retiradas (dashboard, competencia, campañas) caen a 'setup' —
     // competencia vive dentro de Setup; las campañas se ven en Anuncios →
     // Métricas (pedido del user 22/10: estaba de más en el producto).
-    const REMOVED = ['dashboard', 'competencia', 'campanas', 'creativos'];
+    const REMOVED = ['dashboard', 'competencia', 'campanas', 'creativos', 'guiones'];
     try {
       const saved = localStorage.getItem(productoTabKey) || 'setup';
       setProductoTab(REMOVED.includes(saved) ? 'setup' : saved);

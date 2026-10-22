@@ -22,7 +22,7 @@ import {
   Package, Target, Play, Check, Loader2, AlertTriangle, ChevronRight, ChevronDown,
   Plus, X, Sparkles, Link2, Search, Clock, Inbox, Trash2, Upload, Download, Activity,
   LayoutGrid, List as ListIcon, BarChart3, Copy, Pencil, MoreHorizontal, Users, History,
-  Plug,
+  Plug, Settings,
 } from 'lucide-react';
 // Conexión con Meta: estado compartido con el botón del header.
 import { useMetaConnections, openMetaConnect, authHeaders as metaAuthHeaders } from './MetaConnect.jsx';
@@ -1453,12 +1453,20 @@ export default function ArranqueSection({ addToast, onGoToSection, modoAlta = fa
   const [wizCampLoading, setWizCampLoading] = useState(false);
   // Estáticos → Nueva carga: entra directo al alta del producto (el setup de
   // siempre como primer paso). Al crear o cancelar, vuelve a Productos.
+  // Si se llega desde "Editar setup" de un producto, abre el setup de ese.
   useEffect(() => {
     if (!modoAlta) return;
+    let editar = null;
+    try { editar = localStorage.getItem('adslab-setup-producto'); localStorage.removeItem('adslab-setup-producto'); } catch {}
+    if (editar && productos.some(p => String(p.id) === String(editar))) {
+      setActiveProductoId(String(editar));
+      setShowProdForm(false);
+      return;
+    }
     setActiveProductoId(null);
     setShowProdForm(true);
     setWizPaso(1);
-  }, [modoAlta]);
+  }, [modoAlta]); // eslint-disable-line react-hooks/exhaustive-deps
   // Desde el setup (Nueva carga), los atajos a otras pestañas abren el
   // producto en Productos con esa pestaña.
   const irATab = (t) => { setProductoTab(t); if (modoAlta) setTimeout(() => onGoToSection?.('mk-arranque'), 0); };
@@ -3214,7 +3222,7 @@ export default function ArranqueSection({ addToast, onGoToSection, modoAlta = fa
             <div>
               <h2 className="text-lg font-bold text-gray-900 dark:text-gray-100">{modoAlta ? 'Nueva carga' : 'Tus productos'}</h2>
               <p className="text-xs text-gray-500 dark:text-gray-400">{modoAlta
-                ? 'Cargá un producto nuevo, o elegí uno de abajo para completar o editar su setup.'
+                ? 'Cargá un producto nuevo y completá su setup.'
                 : 'Cada producto tiene su propia competencia, research y bandeja de ideas.'}</p>
             </div>
           </div>
@@ -3440,8 +3448,8 @@ export default function ArranqueSection({ addToast, onGoToSection, modoAlta = fa
           </div>
         )}
 
-        {/* Lista de productos existentes */}
-        {productos.length === 0 && sincronizando ? (
+        {/* Lista de productos existentes (en Nueva carga no: ahí solo el setup) */}
+        {modoAlta ? null : productos.length === 0 && sincronizando ? (
           <div className="border border-gray-200 dark:border-gray-700 rounded-2xl p-10 flex flex-col items-center gap-3 text-center">
             <Loader2 size={22} className="animate-spin text-brand-500" />
             <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">Trayendo tus productos…</p>
@@ -4014,6 +4022,16 @@ export default function ArranqueSection({ addToast, onGoToSection, modoAlta = fa
           </p>
           <h2 className="text-xl font-bold text-gray-900 dark:text-gray-100 truncate leading-tight">{producto.nombre}</h2>
         </div>
+        {!modoAlta && (
+          <button onClick={() => {
+            try { localStorage.setItem('adslab-setup-producto', String(producto.id)); } catch {}
+            onGoToSection?.('mk-nueva-carga');
+          }}
+            className="shrink-0 inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-gray-200 border border-[rgba(130,180,255,0.22)] rounded-[10px] hover:bg-brand-500/10 transition"
+            title="El setup de este producto (foto, formato, seguimiento en Meta, competencia)">
+            <Settings size={14} /> Editar setup
+          </button>
+        )}
       </div>
 
       {/* Tabs del workspace — Dashboard, Setup, Bandeja, Inspiración, Creativos.

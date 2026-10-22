@@ -12,6 +12,7 @@ import LandingPage from './LandingPage.jsx';
 import BocetosSection from './Bocetos.jsx';
 import KombialoSeccion, { SECCIONES_KOMBIALO } from './KombialoSeccion.jsx';
 import InicioKombi from './InicioKombi.jsx';
+import EquipoCreativo from './EquipoCreativo.jsx';
 import CalculadoraPrecios from './CalculadoraPrecios.jsx';
 import MarketingSection from './Marketing.jsx';
 // CompetenciaSection (./Competencia.jsx) fue deprecada — la fuente de verdad
@@ -1500,6 +1501,15 @@ function AppShell({ onExit }) {
       return validSections.includes(saved) || SECCIONES_KOMBIALO[saved] ? saved : 'mk-home';
     } catch { return 'mk-home'; }
   });
+  // Producción ahora es la pestaña "Tablero" de Equipo creativo: un link o
+  // aviso viejo a mk-produccion abre Equipo creativo en esa pestaña (y así
+  // el menú marca el ítem correcto).
+  useEffect(() => {
+    if (currentSection !== 'mk-produccion') return;
+    try { localStorage.setItem('adslab-equipo-creativo-tab', 'tablero'); } catch {}
+    setCurrentSection('mk-creativa');
+  }, [currentSection]);
+
   useEffect(() => {
     try { localStorage.setItem('adslab-last-section', currentSection); } catch {}
   }, [currentSection]);
@@ -2545,9 +2555,8 @@ function AppShell({ onExit }) {
                   {(!currentUser.miembro || currentUser.miembro.areas.includes('produccion')) && (
                     <NavItem sub icon={Users} label="Equipo creativo" section="mk-creativa" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
                   )}
-                  {(!currentUser.miembro || currentUser.miembro.areas.includes('produccion')) && (
-                    <NavItem sub icon={Film} label="Producción" section="mk-produccion" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
-                  )}
+                  {/* Producción vive como pestaña "Tablero" de Equipo creativo
+                      (mk-produccion sigue abriendo ahí: links y avisos viejos). */}
                   {(!currentUser.miembro || currentUser.miembro.areas.includes('landings')) && (
                     <NavItem sub icon={ClipboardList} label="Landings" section="mk-landings" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
                   )}
@@ -2656,7 +2665,7 @@ function AppShell({ onExit }) {
               ya hay supabaseUser. */}
           {currentUser.role === 'admin' && currentPlatform === 'marketing' && (supabaseUser || !supabase) && currentSection === 'mk-home' && <InicioKombi nombre={currentUser.name} addToast={addToast} />}
           {currentUser.role === 'admin' && currentPlatform === 'marketing' && (supabaseUser || !supabase) && currentSection === 'mk-calculadora' && <CalculadoraPrecios />}
-          {currentUser.role === 'admin' && currentPlatform === 'marketing' && (supabaseUser || !supabase) && currentSection === 'mk-creativa' && <HomeOS nombre={currentUser.name} onNavigate={(s) => setCurrentSection(s)} addToast={addToast} />}
+          {currentUser.role === 'admin' && currentPlatform === 'marketing' && (supabaseUser || !supabase) && currentSection === 'mk-creativa' && <EquipoCreativo nombre={currentUser.name} onNavigate={(s) => setCurrentSection(s)} addToast={addToast} />}
           {currentUser.role === 'admin' && currentPlatform === 'marketing' && (supabaseUser || !supabase) && currentSection === 'mk-copy' && <CopyGeneratorSection addToast={addToast} />}
           {currentUser.role === 'admin' && currentPlatform === 'marketing' && (supabaseUser || !supabase) && currentSection === 'mk-arranque' && <ArranqueSection addToast={addToast} onGoToSection={setCurrentSection} />}
           {currentUser.role === 'admin' && currentPlatform === 'marketing' && (supabaseUser || !supabase) && currentSection === 'mk-nueva-carga' && <ArranqueSection modoAlta addToast={addToast} onGoToSection={setCurrentSection} />}
@@ -2671,7 +2680,7 @@ function AppShell({ onExit }) {
           {currentUser.role === 'admin' && currentPlatform === 'marketing' && (supabaseUser || !supabase) && currentSection === 'mk-winners' && <WinnersGlobalSection addToast={addToast} onGoToSection={setCurrentSection} />}
           {currentUser.role === 'admin' && currentPlatform === 'marketing' && (supabaseUser || !supabase) && currentSection === 'mk-plan' && <PlanSection addToast={addToast} />}
           {currentUser.role === 'admin' && currentPlatform === 'marketing' && (supabaseUser || !supabase) && SECCIONES_KOMBIALO[currentSection] && <KombialoSeccion seccion={currentSection} />}
-          {currentUser.role === 'admin' && currentPlatform === 'marketing' && (supabaseUser || !supabase) && currentSection === 'mk-produccion' && <ProduccionSection addToast={addToast} />}
+          {currentUser.role === 'admin' && currentPlatform === 'marketing' && (supabaseUser || !supabase) && currentSection === 'mk-produccion' && <EquipoCreativo tabInicial="tablero" nombre={currentUser.name} onNavigate={(s) => setCurrentSection(s)} addToast={addToast} />}
           {currentUser.role === 'admin' && currentPlatform === 'marketing' && (supabaseUser || !supabase) && currentSection === 'mk-landings' && <LandingsSection addToast={addToast} />}
           {currentUser.role === 'admin' && esAdminPlataforma() && currentPlatform === 'marketing' && (supabaseUser || !supabase) && currentSection === 'mk-gastos' && <GastosStackSection addToast={addToast} />}
           {currentUser.role === 'admin' && currentPlatform === 'marketing' && (supabaseUser || !supabase) && currentSection === 'mk-docs' && (
@@ -8583,7 +8592,7 @@ function getSectionTitle(user, section) {
     'mk-testeos': 'Marketing · Testeos',
     'mk-inspiracion': 'Inspiración',
     'mk-winners': 'Marketing · Winners',
-    'mk-produccion': 'Producción',
+    'mk-produccion': 'Equipo creativo',
     'mk-landings': 'Landings',
     'mk-gastos': 'Gastos del stack',
     'con-acta': 'Consultoría · Acta de reunión',

@@ -708,7 +708,6 @@ function ProductTabs({ activeTab, onChange }) {
       id: 'creacion',
       label: 'Creación',
       tabs: [
-        { id: 'bandeja', label: 'Bandeja', emoji: '📥' },
         // Creativos: oculta por ahora (pedido del user 22/10). La pestaña y
         // su contenido siguen vivos; para volver, descomentar esta línea.
         // { id: 'creativos', label: 'Creativos', emoji: '🎨' },
@@ -719,7 +718,7 @@ function ProductTabs({ activeTab, onChange }) {
   ];
   return (
     <div className="flex items-stretch gap-2 overflow-x-auto p-1 bg-gray-100 dark:bg-gray-800/70 rounded-xl border border-gray-200 dark:border-gray-700">
-      {groups.map((g, idx) => (
+      {groups.filter(g => g.tabs.length > 0).map((g, idx) => (
         <Fragment key={g.id}>
           {idx > 0 && (
             <div className="w-px bg-gray-300 dark:bg-gray-600 my-1.5 shrink-0" aria-hidden />
@@ -1142,7 +1141,7 @@ export default function ArranqueSection({ addToast, onGoToSection, modoAlta = fa
   // Se persiste por producto para que volver al mismo producto te lleve al
   // último tab que estabas viendo.
   const productoTabKey = activeProductoId ? `adslab-marketing-prod-tab-${activeProductoId}` : null;
-  const [productoTab, setProductoTab] = useState('bandeja');
+  const [productoTab, setProductoTab] = useState('documentos');
   // Bumpeamos esta key para forzar el remount de la Bandeja embebida cuando
   // el generador rápido inserta ideas — así aparecen sin recargar la página.
   const [bandejaRefreshKey, setBandejaRefreshKey] = useState(0);
@@ -1150,17 +1149,17 @@ export default function ArranqueSection({ addToast, onGoToSection, modoAlta = fa
   // loop vive acá (no en la pestaña Bandeja) para que sobreviva al cambio
   // de pestaña dentro del workspace.
   useEffect(() => {
-    if (!productoTabKey) { setProductoTab('bandeja'); return; }
+    if (!productoTabKey) { setProductoTab('documentos'); return; }
     // Tabs retiradas (dashboard, competencia, campañas) caen a 'setup' —
     // competencia vive dentro de Setup; las campañas se ven en Anuncios →
     // Métricas (pedido del user 22/10: estaba de más en el producto).
     // El Setup salió de las pestañas: vive en Estáticos → Nueva carga.
     // Inspiración también salió: es la biblioteca general (Estáticos → Inspiración).
-    const REMOVED = ['dashboard', 'competencia', 'campanas', 'creativos', 'guiones', 'setup', 'inspiracion', 'galeria'];
+    const REMOVED = ['dashboard', 'competencia', 'campanas', 'creativos', 'guiones', 'setup', 'inspiracion', 'galeria', 'bandeja'];
     try {
-      const saved = localStorage.getItem(productoTabKey) || 'bandeja';
-      setProductoTab(REMOVED.includes(saved) ? 'bandeja' : saved);
-    } catch { setProductoTab('bandeja'); }
+      const saved = localStorage.getItem(productoTabKey) || 'documentos';
+      setProductoTab(REMOVED.includes(saved) ? 'documentos' : saved);
+    } catch { setProductoTab('documentos'); }
   }, [productoTabKey]);
   useEffect(() => {
     if (productoTabKey) try { localStorage.setItem(productoTabKey, productoTab); } catch {}
@@ -1205,7 +1204,7 @@ export default function ArranqueSection({ addToast, onGoToSection, modoAlta = fa
         return;
       }
       // Tabs retiradas caen a la Bandeja.
-      if (tab) setProductoTab(['dashboard', 'competencia', 'setup'].includes(tab) ? 'bandeja' : tab);
+      if (tab) setProductoTab(['dashboard', 'competencia', 'setup', 'bandeja'].includes(tab) ? 'documentos' : tab);
     };
     window.addEventListener('viora:product-select', onSelect);
     window.addEventListener('viora:product-tab', onTab);
@@ -4679,8 +4678,9 @@ export default function ArranqueSection({ addToast, onGoToSection, modoAlta = fa
         )}
       </WizardCard>
 
-      {/* Paso 3 — Competidores (summary). Gestión completa vive en tab Competencia. */}
-      <WizardCard
+      {/* Paso 3 — Competidores: oculto (pedido 22/10). No alimenta a los
+          estáticos; las marcas se suman desde Estáticos → Inspiración. */}
+      {MOSTRAR_IDEAS && <WizardCard
         num="3"
         title="Competencia"
         done={compsReady}
@@ -4846,7 +4846,7 @@ export default function ArranqueSection({ addToast, onGoToSection, modoAlta = fa
             })}
           </div>
         )}
-      </WizardCard>
+      </WizardCard>}
 
       {/* Paso 4 — Correr pipeline (generación de ideas): oculto por ahora,
           pedido 22/10 — el foco es estáticos, y la competencia no los alimenta. */}

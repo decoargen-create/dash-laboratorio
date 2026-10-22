@@ -11,6 +11,8 @@ import Landing from './Landing.jsx';
 import LandingPage from './LandingPage.jsx';
 import BocetosSection from './Bocetos.jsx';
 import KombialoSeccion, { SECCIONES_KOMBIALO } from './KombialoSeccion.jsx';
+import InicioKombi from './InicioKombi.jsx';
+import CalculadoraPrecios from './CalculadoraPrecios.jsx';
 import MarketingSection from './Marketing.jsx';
 // CompetenciaSection (./Competencia.jsx) fue deprecada — la fuente de verdad
 // vive en productos[].competidores (Arranque). Su key vieja
@@ -1494,7 +1496,7 @@ function AppShell({ onExit }) {
       // Si tenía una sección de Viora/Senydrop/MetaAds, defaulteamos a la
       // de Marketing. Lista de secciones válidas en las plataformas activas:
       const validSections = ['mk-home', 'mk-arranque', 'mk-bandeja', 'mk-copy', 'mk-metricas', 'mk-testeos',
-        'mk-inspiracion', 'mk-winners', 'mk-produccion', 'mk-publicar', 'mk-landings', 'mk-gastos', 'mk-docs', 'mk-plan', 'con-acta', 'mk-nueva-carga', 'mk-escalar'];
+        'mk-inspiracion', 'mk-winners', 'mk-produccion', 'mk-publicar', 'mk-landings', 'mk-gastos', 'mk-docs', 'mk-plan', 'con-acta', 'mk-nueva-carga', 'mk-escalar', 'mk-creativa', 'mk-calculadora'];
       return validSections.includes(saved) || SECCIONES_KOMBIALO[saved] ? saved : 'mk-home';
     } catch { return 'mk-home'; }
   });
@@ -2296,7 +2298,7 @@ function AppShell({ onExit }) {
     const SECCIONES_AREA = {
       metricas: ['mk-home', 'mk-metricas', 'mk-escalar'],
       productos: ['mk-home', 'mk-arranque', 'mk-nueva-carga'],
-      produccion: ['mk-home', 'mk-produccion', 'mk-publicar'],
+      produccion: ['mk-home', 'mk-produccion', 'mk-publicar', 'mk-creativa'],
       landings: ['mk-home', 'mk-landings'],
     };
     const permitidas = new Set((m.areas || []).flatMap(a => SECCIONES_AREA[a] || []));
@@ -2537,7 +2539,12 @@ function AppShell({ onExit }) {
               )}
               {(!currentUser.miembro || currentUser.miembro.areas.some(a => a === 'produccion' || a === 'landings')) && (
                 <NavSection title="Área creativa" icon={Film} sectionKey="mk-creativa" sidebarOpen={sidebarOpen}>
-                  {/* El Resumen (CreativaDashboard) vive embebido en el Home. */}
+                  {/* Seguimiento: lo que era el Inicio de AdsLab (primeros pasos,
+                      pulso de hoy, editores, publicables y pagos). El Inicio
+                      ahora es el de Kombialo (InicioKombi). */}
+                  {(!currentUser.miembro || currentUser.miembro.areas.includes('produccion')) && (
+                    <NavItem sub icon={Users} label="Equipo creativo" section="mk-creativa" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
+                  )}
                   {(!currentUser.miembro || currentUser.miembro.areas.includes('produccion')) && (
                     <NavItem sub icon={Film} label="Producción" section="mk-produccion" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
                   )}
@@ -2549,12 +2556,7 @@ function AppShell({ onExit }) {
               {!currentUser.miembro && (
                 <>
                   <NavItem icon={CreditCard} label="Suscripción" section="mk-plan" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
-                  <a href="https://calculadoraecom.com" target="_blank" rel="noopener noreferrer" title={!sidebarOpen ? 'Calculadora' : undefined}
-                    className="w-full flex items-center gap-[11px] px-3 py-2.5 rounded-[10px] text-[#9c9cb8] hover:text-white hover:bg-[#1a1a2a] transition-colors duration-150">
-                    <Calculator size={19} className="shrink-0" />
-                    {sidebarOpen && <span className="text-[14px] font-semibold whitespace-nowrap">Calculadora</span>}
-                    {sidebarOpen && <ArrowUpRight size={14} className="opacity-70" />}
-                  </a>
+                  <NavItem icon={Calculator} label="Calculadora" section="mk-calculadora" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
                 </>
               )}
               {/* "Finanzas → Gastos del stack" salió del menú (pedido del user):
@@ -2652,7 +2654,9 @@ function AppShell({ onExit }) {
           {/* Gate doble de Supabase removido — ahora la auth Supabase es la
               ÚNICA puerta global (ver checkpoint arriba). Si llegamos acá,
               ya hay supabaseUser. */}
-          {currentUser.role === 'admin' && currentPlatform === 'marketing' && (supabaseUser || !supabase) && currentSection === 'mk-home' && <HomeOS nombre={currentUser.name} onNavigate={(s) => setCurrentSection(s)} addToast={addToast} />}
+          {currentUser.role === 'admin' && currentPlatform === 'marketing' && (supabaseUser || !supabase) && currentSection === 'mk-home' && <InicioKombi nombre={currentUser.name} addToast={addToast} />}
+          {currentUser.role === 'admin' && currentPlatform === 'marketing' && (supabaseUser || !supabase) && currentSection === 'mk-calculadora' && <CalculadoraPrecios />}
+          {currentUser.role === 'admin' && currentPlatform === 'marketing' && (supabaseUser || !supabase) && currentSection === 'mk-creativa' && <HomeOS nombre={currentUser.name} onNavigate={(s) => setCurrentSection(s)} addToast={addToast} />}
           {currentUser.role === 'admin' && currentPlatform === 'marketing' && (supabaseUser || !supabase) && currentSection === 'mk-copy' && <CopyGeneratorSection addToast={addToast} />}
           {currentUser.role === 'admin' && currentPlatform === 'marketing' && (supabaseUser || !supabase) && currentSection === 'mk-arranque' && <ArranqueSection addToast={addToast} onGoToSection={setCurrentSection} />}
           {currentUser.role === 'admin' && currentPlatform === 'marketing' && (supabaseUser || !supabase) && currentSection === 'mk-nueva-carga' && <ArranqueSection modoAlta addToast={addToast} onGoToSection={setCurrentSection} />}
@@ -8585,6 +8589,8 @@ function getSectionTitle(user, section) {
     'con-acta': 'Consultoría · Acta de reunión',
     'mk-publicar': 'Publicador',
     'mk-escalar': 'Escalar ADS',
+    'mk-creativa': 'Equipo creativo',
+    'mk-calculadora': 'Calculadora',
     'mk-nueva-carga': 'Nueva carga',
     'mk-plan': 'Suscripción',
     ...Object.fromEntries(Object.entries(SECCIONES_KOMBIALO).map(([k, v]) => [k, v.titulo])),

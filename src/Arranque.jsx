@@ -621,7 +621,7 @@ function RunHistoryCard({ history, onClear }) {
 // ("demasiada info"): el user la abre solo si la necesita. El estado
 // abierto/cerrado se persiste.
 const FLOW_STEPS = [
-  { emoji: '⚙️', tab: 'setup', titulo: 'Setup', desc: 'Cargá el producto (foto, oferta) y sus competidores.' },
+  { emoji: '⚙️', tab: null, titulo: 'Nueva carga', desc: 'En Estáticos → Nueva carga: cargás el producto (foto, oferta, formato) y sus competidores.' },
   { emoji: '▶️', tab: null, titulo: 'Analizar y generar ideas', desc: 'Miramos los anuncios ganadores de tu competencia y te armamos ideas.' },
   { emoji: '📥', tab: 'bandeja', titulo: 'Bandeja', desc: 'Revisás cada idea y generás el creativo ahí mismo.' },
   { emoji: '🖼️', tab: 'galeria', titulo: 'Galería', desc: 'Ves los estáticos generados, listos para descargar.' },
@@ -697,7 +697,6 @@ function ProductTabs({ activeTab, onChange }) {
       id: 'datos',
       label: 'Datos',
       tabs: [
-        { id: 'setup', label: 'Setup', emoji: '⚙️' },
         { id: 'documentos', label: 'Documentos', emoji: '📄' },
       ],
     },
@@ -1141,7 +1140,7 @@ export default function ArranqueSection({ addToast, onGoToSection, modoAlta = fa
   // Se persiste por producto para que volver al mismo producto te lleve al
   // último tab que estabas viendo.
   const productoTabKey = activeProductoId ? `adslab-marketing-prod-tab-${activeProductoId}` : null;
-  const [productoTab, setProductoTab] = useState('setup');
+  const [productoTab, setProductoTab] = useState('inspiracion');
   // Bumpeamos esta key para forzar el remount de la Bandeja embebida cuando
   // el generador rápido inserta ideas — así aparecen sin recargar la página.
   const [bandejaRefreshKey, setBandejaRefreshKey] = useState(0);
@@ -1149,15 +1148,16 @@ export default function ArranqueSection({ addToast, onGoToSection, modoAlta = fa
   // loop vive acá (no en la pestaña Bandeja) para que sobreviva al cambio
   // de pestaña dentro del workspace.
   useEffect(() => {
-    if (!productoTabKey) { setProductoTab('setup'); return; }
+    if (!productoTabKey) { setProductoTab('inspiracion'); return; }
     // Tabs retiradas (dashboard, competencia, campañas) caen a 'setup' —
     // competencia vive dentro de Setup; las campañas se ven en Anuncios →
     // Métricas (pedido del user 22/10: estaba de más en el producto).
-    const REMOVED = ['dashboard', 'competencia', 'campanas', 'creativos', 'guiones'];
+    // El Setup salió de las pestañas: vive en Estáticos → Nueva carga.
+    const REMOVED = ['dashboard', 'competencia', 'campanas', 'creativos', 'guiones', 'setup'];
     try {
-      const saved = localStorage.getItem(productoTabKey) || 'setup';
-      setProductoTab(REMOVED.includes(saved) ? 'setup' : saved);
-    } catch { setProductoTab('setup'); }
+      const saved = localStorage.getItem(productoTabKey) || 'inspiracion';
+      setProductoTab(REMOVED.includes(saved) ? 'inspiracion' : saved);
+    } catch { setProductoTab('inspiracion'); }
   }, [productoTabKey]);
   useEffect(() => {
     if (productoTabKey) try { localStorage.setItem(productoTabKey, productoTab); } catch {}
@@ -1192,7 +1192,7 @@ export default function ArranqueSection({ addToast, onGoToSection, modoAlta = fa
     const onTab = (e) => {
       const tab = e?.detail?.tab;
       // Tabs retiradas caen a 'setup' (competencia ahora vive ahí).
-      if (tab) setProductoTab(['dashboard', 'competencia'].includes(tab) ? 'setup' : tab);
+      if (tab) setProductoTab(['dashboard', 'competencia', 'setup'].includes(tab) ? 'inspiracion' : tab);
     };
     window.addEventListener('viora:product-select', onSelect);
     window.addEventListener('viora:product-tab', onTab);
@@ -1206,10 +1206,10 @@ export default function ArranqueSection({ addToast, onGoToSection, modoAlta = fa
   // progreso detallado del pipeline — el pill flotante sería redundante.
   // En cualquier otro tab (o sin producto activo), dejamos el pill visible.
   useEffect(() => {
-    const inSetup = !!activeProductoId && productoTab === 'setup';
+    const inSetup = !!activeProductoId && modoAlta;
     pipelineRun.setSuppressOverlay?.(inSetup);
     return () => pipelineRun.setSuppressOverlay?.(false);
-  }, [activeProductoId, productoTab]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [activeProductoId, modoAlta]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Producto activo derivado + competidores + cuenta Meta del producto activo.
   const producto = productos.find(p => String(p.id) === String(activeProductoId)) || null;
@@ -1459,6 +1459,9 @@ export default function ArranqueSection({ addToast, onGoToSection, modoAlta = fa
     setShowProdForm(true);
     setWizPaso(1);
   }, [modoAlta]);
+  // Desde el setup (Nueva carga), los atajos a otras pestañas abren el
+  // producto en Productos con esa pestaña.
+  const irATab = (t) => { setProductoTab(t); if (modoAlta) setTimeout(() => onGoToSection?.('mk-arranque'), 0); };
   const resetWizard = () => { setWizPaso(1); setWizCx({ accountId: '', accountName: '', currency: '', connId: null, campanaBaseId: '', campanaBaseName: '', breakEven: '1.60', comp1: '', comp2: '' }); setWizCampanas([]); };
   const cargarCampanasWizard = async (accId, connId) => {
     setWizCampanas([]);
@@ -1871,8 +1874,6 @@ export default function ArranqueSection({ addToast, onGoToSection, modoAlta = fa
     resetWizard();
     setShowProdForm(false);
     setActiveProductoId(String(nuevoId));
-    // Desde "Nueva carga": el producto recién creado se abre en Productos.
-    if (modoAlta) onGoToSection?.('mk-arranque');
     addToast?.({
       type: 'success',
       message: wizCx.accountId
@@ -3211,8 +3212,10 @@ export default function ArranqueSection({ addToast, onGoToSection, modoAlta = fa
               <Package size={20} />
             </div>
             <div>
-              <h2 className="text-lg font-bold text-gray-900 dark:text-gray-100">Tus productos</h2>
-              <p className="text-xs text-gray-500 dark:text-gray-400">Cada producto tiene su propia competencia, research y bandeja de ideas.</p>
+              <h2 className="text-lg font-bold text-gray-900 dark:text-gray-100">{modoAlta ? 'Nueva carga' : 'Tus productos'}</h2>
+              <p className="text-xs text-gray-500 dark:text-gray-400">{modoAlta
+                ? 'Cargá un producto nuevo, o elegí uno de abajo para completar o editar su setup.'
+                : 'Cada producto tiene su propia competencia, research y bandeja de ideas.'}</p>
             </div>
           </div>
           <div className="flex items-center gap-2">
@@ -3263,7 +3266,7 @@ export default function ArranqueSection({ addToast, onGoToSection, modoAlta = fa
               onDiagnostico={() => setShowDiagnostico(true)}
               onImportar={() => importFileInputRef.current?.click()}
             />
-            <button onClick={() => setShowProdForm(true)}
+            <button onClick={() => (modoAlta ? setShowProdForm(true) : onGoToSection?.('mk-nueva-carga'))}
               className="btn-fluo inline-flex items-center gap-1.5 px-4 py-2.5 text-sm font-bold text-white bg-gradient-to-br from-brand-500 to-brand-700 rounded-lg hover:from-brand-600 hover:to-brand-800 shadow-sm">
               <Plus size={16} /> Nuevo producto
             </button>
@@ -3404,7 +3407,7 @@ export default function ArranqueSection({ addToast, onGoToSection, modoAlta = fa
             )}
 
             <div className="flex gap-2 justify-end">
-              <button onClick={() => { setShowProdForm(false); setProdDraft({ nombre: '', landingUrl: '', descripcion: '', formato: '', medidas: '', claves: '' }); resetWizard(); if (modoAlta) onGoToSection?.('mk-arranque'); }}
+              <button onClick={() => { setShowProdForm(false); setProdDraft({ nombre: '', landingUrl: '', descripcion: '', formato: '', medidas: '', claves: '' }); resetWizard(); }}
                 className="px-3 py-1.5 text-xs font-semibold text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md hover:bg-gray-50 transition">
                 Cancelar
               </button>
@@ -3477,7 +3480,7 @@ export default function ArranqueSection({ addToast, onGoToSection, modoAlta = fa
               </div>
 
               <div className="flex flex-col sm:flex-row items-center justify-center gap-2.5">
-                <button onClick={() => setShowProdForm(true)}
+                <button onClick={() => (modoAlta ? setShowProdForm(true) : onGoToSection?.('mk-nueva-carga'))}
                   className="inline-flex items-center gap-2 px-6 py-3 text-sm font-bold text-white bg-gradient-to-br from-brand-500 to-brand-700 rounded-xl hover:from-brand-600 hover:to-brand-800 shadow-md transition">
                   <Plus size={16} /> Crear mi primer producto
                 </button>
@@ -4007,7 +4010,7 @@ export default function ArranqueSection({ addToast, onGoToSection, modoAlta = fa
         <div className="flex-1 min-w-0">
           <p className="text-[10px] font-semibold uppercase tracking-wider text-gray-400 dark:text-gray-500">
             <button onClick={() => setActiveProductoId(null)} className="hover:text-brand-500 transition">Productos</button>
-            <span className="mx-1">/</span>Workspace
+            <span className="mx-1">/</span>{modoAlta ? 'Setup' : 'Workspace'}
           </p>
           <h2 className="text-xl font-bold text-gray-900 dark:text-gray-100 truncate leading-tight">{producto.nombre}</h2>
         </div>
@@ -4018,9 +4021,9 @@ export default function ArranqueSection({ addToast, onGoToSection, modoAlta = fa
           (ProductNavInSidebar) fue removido por pedido del user, así que estas
           son la única forma de cambiar de tab — antes quedaban ocultas con el
           sidebar abierto y no aparecían en ningún lado. */}
-      <ProductTabs activeTab={productoTab} onChange={setProductoTab} />
+      {!modoAlta && <ProductTabs activeTab={productoTab} onChange={setProductoTab} />}
 
-      {productoTab === 'bandeja' && (
+      {!modoAlta && productoTab === 'bandeja' && (
         <div className="space-y-4">
           <GeneradorRapido
             producto={producto}
@@ -4033,7 +4036,7 @@ export default function ArranqueSection({ addToast, onGoToSection, modoAlta = fa
         </div>
       )}
 
-      {productoTab === 'documentos' && (
+      {!modoAlta && productoTab === 'documentos' && (
         <DocumentacionTab
           producto={producto}
           addToast={addToast}
@@ -4045,23 +4048,23 @@ export default function ArranqueSection({ addToast, onGoToSection, modoAlta = fa
         />
       )}
 
-      {productoTab === 'campanas' && (
+      {!modoAlta && productoTab === 'campanas' && (
         <div className="-mx-4">
           <CampanasTracker addToast={addToast} />
         </div>
       )}
 
-      {productoTab === 'inspiracion' && (
+      {!modoAlta && productoTab === 'inspiracion' && (
         <div className="-mx-4">
           <InspiracionSection addToast={addToast} forcedProductoId={String(producto.id)} embedded />
         </div>
       )}
 
-      {productoTab === 'guiones' && (
+      {!modoAlta && productoTab === 'guiones' && (
         <TranscripcionVideosSection addToast={addToast} forcedProductoId={String(producto.id)} embedded />
       )}
 
-      {productoTab === 'galeria' && (
+      {!modoAlta && productoTab === 'galeria' && (
         <GaleriaReferencialesModal
           productoId={producto.id}
           productoNombre={producto.nombre}
@@ -4070,7 +4073,7 @@ export default function ArranqueSection({ addToast, onGoToSection, modoAlta = fa
         />
       )}
 
-      {productoTab === 'creativos' && (
+      {!modoAlta && productoTab === 'creativos' && (
         <CreativosTab
           producto={producto}
           addToast={addToast}
@@ -4082,11 +4085,11 @@ export default function ArranqueSection({ addToast, onGoToSection, modoAlta = fa
         />
       )}
 
-      {productoTab === 'copiloto' && (
+      {!modoAlta && productoTab === 'copiloto' && (
         <CopilotoTab producto={producto} addToast={addToast} />
       )}
 
-      {productoTab === 'setup' && <>
+      {modoAlta && <>
 
       {/* Nudge de auto-run: si pasaron > 24h y el user no está corriendo ahora */}
       {ofrecerRun && (
@@ -4873,13 +4876,9 @@ export default function ArranqueSection({ addToast, onGoToSection, modoAlta = fa
               )}
               {!running && steps.length > 0 && (
                 <>
-                  <button onClick={() => setProductoTab('bandeja')}
+                  <button onClick={() => irATab('bandeja')}
                     className="inline-flex items-center gap-1 px-3 py-2 text-xs font-bold text-brand-700 dark:text-brand-300 hover:bg-brand-50 dark:hover:bg-brand-900/20 rounded transition">
                       Ver Bandeja de ideas <ChevronRight size={12} />
-                  </button>
-                  <button onClick={() => setProductoTab('setup')}
-                    className="inline-flex items-center gap-1 px-3 py-2 text-xs font-semibold text-brand-700 dark:text-brand-300 hover:bg-brand-50 dark:hover:bg-brand-900/20 rounded transition">
-                      Ver Competencia <ChevronRight size={12} />
                   </button>
                 </>
               )}
@@ -4917,16 +4916,10 @@ export default function ArranqueSection({ addToast, onGoToSection, modoAlta = fa
                   </p>
                 </div>
                 <button
-                  onClick={() => setProductoTab('bandeja')}
+                  onClick={() => irATab('bandeja')}
                   className="shrink-0 inline-flex items-center gap-1.5 px-4 py-2.5 text-sm font-bold text-white bg-gradient-to-br from-brand-500 to-brand-600 rounded-lg hover:from-brand-600 hover:to-brand-700 shadow-sm transition"
                 >
                   <Inbox size={14} /> Ver ideas en la Bandeja <ChevronRight size={14} />
-                </button>
-                <button
-                  onClick={() => setProductoTab('setup')}
-                  className="shrink-0 inline-flex items-center gap-1 px-3 py-2.5 text-xs font-semibold text-brand-700 dark:text-brand-300 bg-white dark:bg-gray-800 border border-brand-200 dark:border-brand-800 rounded-lg hover:bg-brand-50 dark:hover:bg-brand-900/20 transition"
-                >
-                  Ver Competencia <ChevronRight size={12} />
                 </button>
               </div>
             </div>

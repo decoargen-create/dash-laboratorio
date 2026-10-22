@@ -23,7 +23,6 @@ import { supabase } from './supabase.js';
 import { MetaConnectButton } from './MetaConnect.jsx';
 import { entregasNuevas } from './produccionStore.js';
 import CreativaDashboard from './CreativaDashboard.jsx';
-import PulpoKombi from './PulpoKombi.jsx';
 
 const PRODUCTOS_KEY = 'adslab-marketing-productos-v1';
 
@@ -294,17 +293,6 @@ export default function HomeOS({ nombre, onNavigate, addToast }) {
 
   return (
     <div className="p-4 md:p-8 space-y-6 max-w-6xl">
-      {/* Saludo de Kombi (la cara de la IA de Kombialo). */}
-      <header className="flex items-center gap-4 animate-fade-in-up">
-        <PulpoKombi size={64} />
-        <div className="min-w-0">
-          <p className="text-[11px] font-extrabold uppercase tracking-[.06em] text-gray-400">Kombi · tu copiloto de anuncios</p>
-          <h2 className="text-2xl md:text-[26px] font-extrabold tracking-tight text-gray-900 dark:text-gray-100 truncate">
-            {saludoHora()}{nombre ? `, ${String(nombre).split(' ')[0]}` : ''}
-          </h2>
-          <p className="text-sm text-gray-500 dark:text-gray-400">Esto es lo que pasa hoy en tus anuncios.</p>
-        </div>
-      </header>
       {/* ── 1. Primeros pasos ─────────────────────────────────────────── */}
       {!cargandoPasos && pendientes > 0 && (
         <section className="rounded-2xl border border-violet-300/40 dark:border-violet-700/40 bg-violet-500/5 p-4 md:p-5">
@@ -410,8 +398,7 @@ export default function HomeOS({ nombre, onNavigate, addToast }) {
         )}
       </section>
 
-      {/* ── 3. Área creativa — el resumen del mes vive acá (híbrido):
-             tarjetas por producto, publicables y pagos, sin salir del Home. */}
+      {/* ── 3. Área creativa: tarjetas por producto, publicables y pagos. */}
       <section>
         <CreativaDashboard embedded addToast={addToast} />
       </section>

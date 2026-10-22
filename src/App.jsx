@@ -2735,7 +2735,6 @@ const PRODUCT_TABS = {
   datos: [
     { id: 'setup',       label: 'Setup',       emoji: '⚙️' },
     { id: 'documentos',  label: 'Documentos',  emoji: '📄' },
-    { id: 'campanas',    label: 'Campañas',    emoji: '📈' },
   ],
   creacion: [
     { id: 'bandeja',     label: 'Bandeja',     emoji: '📥' },

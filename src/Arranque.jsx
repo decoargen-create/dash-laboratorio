@@ -672,7 +672,6 @@ function ProductTabs({ activeTab, onChange }) {
       tabs: [
         { id: 'setup', label: 'Setup', emoji: '⚙️' },
         { id: 'documentos', label: 'Documentos', emoji: '📄' },
-        { id: 'campanas', label: 'Campañas', emoji: '📈' },
       ],
     },
     {
@@ -1121,9 +1120,10 @@ export default function ArranqueSection({ addToast, onGoToSection, modoAlta = fa
   // de pestaña dentro del workspace.
   useEffect(() => {
     if (!productoTabKey) { setProductoTab('setup'); return; }
-    // Tabs retiradas (dashboard, competencia) caen a 'setup' — competencia
-    // ahora vive como sección dentro de Setup.
-    const REMOVED = ['dashboard', 'competencia'];
+    // Tabs retiradas (dashboard, competencia, campañas) caen a 'setup' —
+    // competencia vive dentro de Setup; las campañas se ven en Anuncios →
+    // Métricas (pedido del user 22/10: estaba de más en el producto).
+    const REMOVED = ['dashboard', 'competencia', 'campanas'];
     try {
       const saved = localStorage.getItem(productoTabKey) || 'setup';
       setProductoTab(REMOVED.includes(saved) ? 'setup' : saved);

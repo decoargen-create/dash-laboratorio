@@ -1443,7 +1443,7 @@ export default function ArranqueSection({ addToast, onGoToSection, modoAlta = fa
   useEffect(() => {
     try { localStorage.setItem('adslab-productos-vista', vista); } catch {}
   }, [vista]);
-  const [prodDraft, setProdDraft] = useState({ nombre: '', landingUrl: '', descripcion: '', formato: '', medidas: '' });
+  const [prodDraft, setProdDraft] = useState({ nombre: '', landingUrl: '', descripcion: '', formato: '', medidas: '', claves: '' });
   // Wizard de ALTA de producto (Kombialo OS, etapa 1): el producto nace
   // enchufado — cuenta publicitaria, campaña base de referencia, break-even
   // y primeros competidores, todo en el alta en vez de configurarse después.
@@ -1853,6 +1853,7 @@ export default function ArranqueSection({ addToast, onGoToSection, modoAlta = fa
       descripcion: prodDraft.descripcion.trim(),
       ...(prodDraft.formato ? { formato: prodDraft.formato } : {}),
       ...(prodDraft.medidas.trim() ? { medidas: prodDraft.medidas.trim() } : {}),
+      ...(prodDraft.claves.trim() ? { palabrasClave: prodDraft.claves.split(',').map(x => x.trim()).filter(Boolean) } : {}),
       competidores: comps,
       createdAt: new Date().toISOString(),
     };
@@ -1866,7 +1867,7 @@ export default function ArranqueSection({ addToast, onGoToSection, modoAlta = fa
     if (Number.isFinite(be) && be > 0) nuevo.breakEven = be;
 
     setProductos(prev => [nuevo, ...prev]);
-    setProdDraft({ nombre: '', landingUrl: '', descripcion: '', formato: '', medidas: '' });
+    setProdDraft({ nombre: '', landingUrl: '', descripcion: '', formato: '', medidas: '', claves: '' });
     resetWizard();
     setShowProdForm(false);
     setActiveProductoId(String(nuevoId));
@@ -3325,6 +3326,13 @@ export default function ArranqueSection({ addToast, onGoToSection, modoAlta = fa
             {wizPaso === 3 && (
               <div className="space-y-3">
                 <div>
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400 block mb-1">Palabras clave de las campañas</span>
+                  <input type="text" value={prodDraft.claves} onChange={e => setProdDraft({ ...prodDraft, claves: e.target.value })}
+                    placeholder="ej: aceite, oil"
+                    className="w-full px-2.5 py-1.5 text-sm bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-brand-500" />
+                  <p className="text-[11px] text-gray-400 mt-1">Toda campaña cuyo nombre tenga alguna de estas palabras se trackea para este producto.</p>
+                </div>
+                <div>
                   <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400 block mb-1">Cuenta publicitaria · opcional</span>
                   {!metaConnected ? (
                     <p className="text-xs text-gray-500 dark:text-gray-400">Sin conexión con Meta todavía — podés saltear esto y conectarla después desde la tarjeta "Tu cuenta publicitaria".</p>
@@ -3396,7 +3404,7 @@ export default function ArranqueSection({ addToast, onGoToSection, modoAlta = fa
             )}
 
             <div className="flex gap-2 justify-end">
-              <button onClick={() => { setShowProdForm(false); setProdDraft({ nombre: '', landingUrl: '', descripcion: '', formato: '', medidas: '' }); resetWizard(); if (modoAlta) onGoToSection?.('mk-arranque'); }}
+              <button onClick={() => { setShowProdForm(false); setProdDraft({ nombre: '', landingUrl: '', descripcion: '', formato: '', medidas: '', claves: '' }); resetWizard(); if (modoAlta) onGoToSection?.('mk-arranque'); }}
                 className="px-3 py-1.5 text-xs font-semibold text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md hover:bg-gray-50 transition">
                 Cancelar
               </button>
@@ -3410,6 +3418,10 @@ export default function ArranqueSection({ addToast, onGoToSection, modoAlta = fa
                 <button onClick={() => {
                   if (wizPaso === 1 && !prodDraft.nombre.trim()) { addToast?.({ type: 'error', message: 'Ponele nombre al producto' }); return; }
                   if (wizPaso === 2 && metaConnected && availableAccounts.length === 0 && !loadingAccounts) loadAdAccounts();
+                  if (wizPaso === 2 && !prodDraft.claves.trim()) {
+                    const primera = prodDraft.nombre.trim().split(/\s+/).find(w => w.length >= 4) || '';
+                    if (primera) setProdDraft(d => ({ ...d, claves: primera.toLowerCase() }));
+                  }
                   setWizPaso(p => p + 1);
                 }}
                   className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-bold text-white bg-gradient-to-br from-brand-500 to-brand-700 rounded-md hover:from-brand-600 hover:to-brand-800 transition">
@@ -4243,7 +4255,7 @@ export default function ArranqueSection({ addToast, onGoToSection, modoAlta = fa
               No te pedimos stage (problem/solution/product-aware) porque lo inferimos solos del research doc cuando corras el pipeline.
             </p>
             <div className="flex gap-2 justify-end">
-              <button onClick={() => { setShowProdForm(false); setProdDraft({ nombre: '', landingUrl: '', descripcion: '', formato: '', medidas: '' }); }}
+              <button onClick={() => { setShowProdForm(false); setProdDraft({ nombre: '', landingUrl: '', descripcion: '', formato: '', medidas: '', claves: '' }); }}
                 className="px-3 py-1.5 text-xs font-semibold text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md hover:bg-gray-50 transition">
                 Cancelar
               </button>
@@ -4259,10 +4271,64 @@ export default function ArranqueSection({ addToast, onGoToSection, modoAlta = fa
       {/* Paso 2 — Cuenta publicitaria Meta (opcional) */}
       <WizardCard
         num="2"
-        title="Tu cuenta publicitaria (opcional)"
-        done={!!metaAccount}
+        title="Seguimiento en Meta Ads"
+        done={!!metaAccount || (producto.palabrasClave || []).length > 0}
         badge={metaAccount ? `${metaAccount.ads?.length || 0} ads activos` : null}
       >
+        {/* Con qué cuentas y con qué palabra se reconocen las campañas de este
+            producto: "aceite" → toda campaña que lo diga se trackea acá
+            (Métricas e Inicio usan estas palabras como alias). */}
+        <div className="mb-4 space-y-3 pb-4 border-b border-gray-100 dark:border-gray-700/60">
+          <div>
+            <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400 block mb-1">Palabras clave de las campañas</span>
+            <input type="text"
+              defaultValue={(producto.palabrasClave || []).join(', ')}
+              key={`claves-${producto.id}`}
+              onBlur={e => {
+                const claves = e.target.value.split(',').map(x => x.trim()).filter(Boolean);
+                setProductos(prev => prev.map(p => String(p.id) === String(producto.id) ? { ...p, palabrasClave: claves, updated_at: new Date().toISOString() } : p));
+              }}
+              placeholder="ej: aceite, oil"
+              className="w-full px-2.5 py-1.5 text-sm bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-brand-500" />
+            <p className="text-[11px] text-gray-400 mt-1">Toda campaña de Meta cuyo nombre tenga alguna de estas palabras se cuenta para este producto. Separalas con comas.</p>
+          </div>
+          {metaConnected && (
+            <div>
+              <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400 block mb-1">Cuentas publicitarias del producto</span>
+              {availableAccounts.length === 0 ? (
+                <button onClick={loadAdAccounts} disabled={loadingAccounts}
+                  className="px-3 py-1.5 text-xs font-bold text-white bg-[#1877F2] rounded-md hover:bg-[#0f6ae0] transition disabled:opacity-50">
+                  {loadingAccounts ? 'Cargando…' : 'Ver mis cuentas'}
+                </button>
+              ) : (
+                <div className="flex flex-wrap gap-2">
+                  {availableAccounts.map(a => {
+                    const extra = producto.metaAccounts || [];
+                    const principal = metaAccount?.id === a.id;
+                    const marcada = principal || extra.some(x => x.id === a.id);
+                    return (
+                      <button key={a.id} disabled={principal}
+                        title={principal ? 'Cuenta principal del producto' : undefined}
+                        onClick={() => setProductos(prev => prev.map(p => {
+                          if (String(p.id) !== String(producto.id)) return p;
+                          const lista = (p.metaAccounts || []).filter(x => x.id !== a.id);
+                          if (!marcada) lista.push({ id: a.id, name: a.name, currency: a.currency, connId: a.connId || null });
+                          return { ...p, metaAccounts: lista, updated_at: new Date().toISOString() };
+                        }))}
+                        className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-full border transition ${marcada
+                          ? 'border-brand-500 bg-brand-500/10 text-brand-600 dark:text-brand-300'
+                          : 'border-gray-300 dark:border-gray-600 text-gray-500 dark:text-gray-400 hover:border-brand-400'}`}>
+                        {marcada ? <Check size={12} /> : <Plus size={12} />}
+                        {a.name || a.id}{principal ? ' · principal' : ''}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+              <p className="text-[11px] text-gray-400 mt-1">Marcá todas las cuentas donde corren anuncios de este producto. La principal es la que elegís abajo.</p>
+            </div>
+          )}
+        </div>
         {!metaConnected ? (
           <div className="space-y-2">
             <p className="text-xs text-gray-500 dark:text-gray-400">

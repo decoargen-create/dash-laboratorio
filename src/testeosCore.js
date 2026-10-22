@@ -339,8 +339,9 @@ export function productoDeCampana(nombre, productos = [], cfg = null) {
     if (!nom) continue;
     const id = typeof p === 'string' ? nom : (p.id ?? nom);
 
-    // 1. Alias cargados a mano para este producto.
-    const alias = (cfg?.porProducto?.[id]?.alias || [])
+    // 1. Alias: los de Métricas → Reglas y las palabras clave del Setup del
+    // producto ("aceite" → toda campaña que lo diga es de ese producto).
+    const alias = [...(cfg?.porProducto?.[id]?.alias || []), ...(typeof p === 'object' && Array.isArray(p?.palabrasClave) ? p.palabrasClave : [])]
       .map(a => normalizar(a)).filter(Boolean);
     const porAlias = alias.filter(a => n.includes(a));
     if (porAlias.length > 0) {

@@ -48,8 +48,9 @@ function useHoy(productos) {
   const cuentas = useMemo(() => {
     const m = new Map();
     for (const p of productos) {
-      const acc = p.metaAccount;
-      if (acc?.id && !m.has(acc.id)) m.set(acc.id, { id: acc.id, connId: acc.connId || null });
+      for (const acc of [p.metaAccount, ...(Array.isArray(p.metaAccounts) ? p.metaAccounts : [])]) {
+        if (acc?.id && !m.has(acc.id)) m.set(acc.id, { id: acc.id, connId: acc.connId || null });
+      }
     }
     return [...m.values()];
   }, [productos]);
@@ -75,16 +76,18 @@ function useHoy(productos) {
           id: p.id,
           nombre: p.nombre || p.name,
           n: norm(p.nombre || p.name),
+          claves: (Array.isArray(p.palabrasClave) ? p.palabrasClave : []).map(norm).filter(Boolean),
           breakEven: Number(p.breakEven || p.cortes?.roasMinimo) || 1.6,
           spend: 0, compras: 0, revenue: 0, campanas: 0, malo: 0,
         }))
-        .filter(p => p.n.length >= 3);
+        .filter(p => p.n.length >= 3 || p.claves.length);
       let sinMatch = 0;
       const tot = { spend: 0, compras: 0, revenue: 0, malo: 0, campBien: 0, campMal: 0 };
       for (const r of rows) {
         const cn = norm(r.name);
         tot.spend += r.spend; tot.compras += r.compras; tot.revenue += r.revenue;
-        const p = prods.find(x => cn.includes(x.n));
+        // Primero las palabras clave del Setup; si ninguna engancha, el nombre.
+        const p = prods.find(x => x.claves.some(k => cn.includes(k))) || prods.find(x => x.n.length >= 3 && cn.includes(x.n));
         const be = p?.breakEven || 1.6;
         const esMalo = r.spend > 0 && r.roas < be;
         if (esMalo) { tot.malo += r.spend; tot.campMal++; }

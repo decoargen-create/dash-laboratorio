@@ -2739,7 +2739,6 @@ const PRODUCT_TABS = {
   creacion: [
     { id: 'bandeja',     label: 'Bandeja',     emoji: '📥' },
     { id: 'inspiracion', label: 'Inspiración', emoji: '✨' },
-    { id: 'creativos',   label: 'Creativos',   emoji: '🎨' },
     { id: 'galeria',     label: 'Galería',     emoji: '🖼️' },
   ],
 };

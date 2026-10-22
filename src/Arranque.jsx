@@ -680,7 +680,9 @@ function ProductTabs({ activeTab, onChange }) {
       tabs: [
         { id: 'bandeja', label: 'Bandeja', emoji: '📥' },
         { id: 'inspiracion', label: 'Inspiración', emoji: '✨' },
-        { id: 'creativos', label: 'Creativos', emoji: '🎨' },
+        // Creativos: oculta por ahora (pedido del user 22/10). La pestaña y
+        // su contenido siguen vivos; para volver, descomentar esta línea.
+        // { id: 'creativos', label: 'Creativos', emoji: '🎨' },
         { id: 'guiones', label: 'Guiones IA', emoji: '🎬' },
         { id: 'galeria', label: 'Galería', emoji: '🖼️' },
       ],
@@ -1123,7 +1125,7 @@ export default function ArranqueSection({ addToast, onGoToSection, modoAlta = fa
     // Tabs retiradas (dashboard, competencia, campañas) caen a 'setup' —
     // competencia vive dentro de Setup; las campañas se ven en Anuncios →
     // Métricas (pedido del user 22/10: estaba de más en el producto).
-    const REMOVED = ['dashboard', 'competencia', 'campanas'];
+    const REMOVED = ['dashboard', 'competencia', 'campanas', 'creativos'];
     try {
       const saved = localStorage.getItem(productoTabKey) || 'setup';
       setProductoTab(REMOVED.includes(saved) ? 'setup' : saved);

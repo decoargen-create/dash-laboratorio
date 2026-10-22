@@ -4167,7 +4167,7 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
                 <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
                 <input
                   type="text" value={query} onChange={e => setQuery(e.target.value)}
-                  placeholder="Buscar — marca, URL, body, OCR, audio del video…"
+                  placeholder="Buscar marca, texto del anuncio o lo que dice el video…"
                   className="w-full pl-7 pr-7 py-1.5 text-xs bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded focus:outline-none focus:ring-1 focus:ring-amber-500"
                 />
                 {searchingServer && (
@@ -4182,27 +4182,27 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
               </div>
               <select value={tipoFiltro} onChange={e => setTipoFiltro(e.target.value)}
                 className="px-2 py-1.5 text-xs bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded">
-                <option value="all">Todos</option>
-                <option value="competidor">Competidores</option>
-                <option value="custom">Custom</option>
+                <option value="all">Marcas: todas</option>
+                <option value="competidor">Solo competencia</option>
+                <option value="custom">Solo las que agregaste a mano</option>
               </select>
               <select value={estadoFiltro} onChange={e => setEstadoFiltro(e.target.value)}
                 className="px-2 py-1.5 text-xs bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded">
-                <option value="all">Todos</option>
-                <option value="con-ads">Con ads</option>
-                <option value="sin-scrapear">Sin scrapear</option>
+                <option value="all">Estado: todas</option>
+                <option value="con-ads">Con anuncios</option>
+                <option value="sin-scrapear">Sin actualizar todavía</option>
               </select>
               <select value={orderBy} onChange={e => setOrderBy(e.target.value)}
                 className="px-2 py-1.5 text-xs bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded">
-                <option value="reciente">Reciente</option>
-                <option value="ads-count">Más ads</option>
-                <option value="nombre">Nombre</option>
+                <option value="reciente">Orden: actualizadas hace poco</option>
+                <option value="ads-count">Orden: más anuncios</option>
+                <option value="nombre">Orden: nombre (A-Z)</option>
               </select>
-              <span className="text-[10px] tabular-nums text-gray-500 dark:text-gray-400 px-1">
-                {unif.length}
+              <span className="text-[11px] tabular-nums text-gray-500 dark:text-gray-400 px-1">
+                {unif.length} marca{unif.length === 1 ? '' : 's'}
               </span>
-              {/* Separador visual + acciones primarias */}
-              <div className="w-px h-5 bg-gray-200 dark:bg-gray-700 mx-1" aria-hidden />
+              {/* Segunda fila: acciones (crear y actualizar), separadas de los filtros */}
+              <div className="basis-full h-0" aria-hidden />
               {/* Opciones de generación — popover con variantes/ratio/quality.
                   Antes solo se veían en la barra de bulk; ahora siempre accesibles. */}
               <div className="relative">
@@ -4211,7 +4211,7 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
                   className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-bold text-gray-700 dark:text-gray-200 bg-gray-100 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded hover:bg-gray-200 dark:hover:bg-gray-600 transition"
                   title={`Opciones de generación · ${genOpts.n || 2} var · ${genOpts.size === '1024x1536' ? 'Portrait' : '1:1'} · ${genOpts.quality}`}
                 >
-                  <Settings2 size={11} /> {genOpts.n || 2}v · {genOpts.size === '1024x1536' ? '9:16' : '1:1'} · {genOpts.quality === 'low' ? 'L' : genOpts.quality === 'medium' ? 'M' : 'H'}
+                  <Settings2 size={11} /> Cómo crear: {genOpts.n || 2} variante{(genOpts.n || 2) === 1 ? '' : 's'} · {genOpts.size === '1024x1536' ? 'vertical 9:16' : genOpts.size === '2048x2048' ? '2K' : 'cuadrado 1:1'} · calidad {genOpts.quality === 'low' ? 'baja' : genOpts.quality === 'medium' ? 'media' : 'alta'}
                 </button>
                 {showGenOpts && (
                   <div className="absolute top-full right-0 mt-1.5 z-40 w-64 bg-white dark:bg-gray-800 border-2 border-brand-300 dark:border-brand-700 rounded-lg shadow-2xl p-3"
@@ -4353,7 +4353,9 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
                 };
                 const isScrapeable = (b) => b.fbPageUrl || b.landingUrl || isKeywordUsable(b.nombre);
 
-                const eligibles = unif.filter(isScrapeable);
+                // En la biblioteca, las marcas de otros productos se actualizan
+                // desde su producto (acá no hay contexto para guardarlas).
+                const eligibles = unif.filter(b => isScrapeable(b) && !b.__ajena);
                 const smartEligibles = eligibles.filter(b => isStaleEnough(b) && !isStable(b));
                 const skippedByCache = eligibles.length - smartEligibles.length;
 
@@ -4398,27 +4400,27 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
                       }`}
                       title="Solo muestra ads ACTIVOS con al menos 5 días corriendo (los que el advertiser ya validó). Apagá para ver también los tests recién lanzados."
                     >
-                      {soloProbados ? '✓ ' : ''}≥5 días
+                      {soloProbados ? '✓ ' : ''}Solo probados (5+ días)
                     </button>
                     <button
                       disabled={scrapingBrandIds.size > 0 || smartEligibles.length === 0}
                       onClick={onSmart}
                       className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-bold text-white bg-gradient-to-br from-purple-500 to-pink-500 rounded hover:from-purple-600 hover:to-pink-600 shadow-sm transition disabled:opacity-50 disabled:cursor-not-allowed"
-                      title={`Scrapea solo marcas no scrapeadas en las últimas ${STALE_HOURS}h y que no son estables (${STABLE_THRESHOLD}+ scrapes sin novedad).${skippedByCache > 0 ? ` ${skippedByCache} saltadas por cache.` : ''}`}
+                      title={`Trae los anuncios nuevos de las marcas que no se actualizaron en las últimas ${STALE_HOURS} h (saltea las que no cambian hace ${STABLE_THRESHOLD} actualizaciones). Lo cobra Apify, ≈ US$ 0,0058 por anuncio.${skippedByCache > 0 ? ` ${skippedByCache} ya están al día.` : ''}`}
                     >
                       {scrapingBrandIds.size > 0
                         ? <><Loader2 size={11} className="animate-spin" /> Scrapeando {scrapingBrandIds.size}…</>
-                        : <><Download size={11} /> Scrape nuevas ({smartEligibles.length})</>}
+                        : <><Download size={11} /> Actualizar marcas ({smartEligibles.length}) · ≈ {fmtUsd(smartEligibles.reduce((t, b) => t + costoScrape(b.__ads?.length), 0))}</>}
                     </button>
                     <button
                       disabled={scrapingBrandIds.size > 0 || eligibles.length === 0}
                       onClick={onForce}
                       className="inline-flex items-center gap-1.5 px-2 py-1.5 text-xs font-semibold text-purple-700 dark:text-purple-300 bg-white dark:bg-gray-800 border border-purple-300 dark:border-purple-700 rounded hover:bg-purple-50 dark:hover:bg-purple-900/20 transition disabled:opacity-50 disabled:cursor-not-allowed"
-                      title="Re-scrapea TODAS las marcas ignorando cache de 24h y estables. Gasta más cuota de Apify."
+                      title={`Actualiza TODAS las marcas aunque se hayan actualizado hoy · ≈ ${fmtUsd(eligibles.reduce((t, b) => t + costoScrape(b.__ads?.length), 0))} de Apify`}
                     >
                       {scrapingBrandIds.size > 0
                         ? <><Loader2 size={11} className="animate-spin" /> En curso…</>
-                        : <><RefreshCw size={11} /> Forzar todas</>}
+                        : <><RefreshCw size={11} /> Actualizar todas ({eligibles.length})</>}
                     </button>
                   </>
                 );
@@ -4433,7 +4435,7 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
                   addToast?.({ type: 'info', message: 'Cargá la marca como competidor — va a aparecer acá automático.' });
                 }}
                 className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-bold text-white bg-gradient-to-br from-amber-500 to-brand-500 rounded hover:from-amber-600 hover:to-brand-600 shadow-sm transition"
-                title="Las marcas se agregan desde Competencia. Click para ir."
+                title={biblioteca ? 'Sumá una marca que haga buenos anuncios (de cualquier rubro): queda en la biblioteca para todos los productos' : 'Las marcas se agregan desde Competencia. Click para ir.'}
               >
                 <Plus size={11} /> {biblioteca ? 'Agregar marca' : 'Marca (en Competencia)'}
               </button>

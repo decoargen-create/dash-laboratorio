@@ -2,7 +2,7 @@
 // leyendo su landing (texto + foto principal). Lo usa el alta de producto
 // (Estáticos → Nueva carga, paso "Formato") para completarlo solo.
 //
-// POST { nombre, landingUrl } → { formato, medidas, ofertas, imagenUrl, motivo, cost }
+// POST { nombre, landingUrl } → { formato, medidas, palancas, imagenUrl, motivo, cost }
 // `formato` es siempre una de las claves de FORMATOS (las mismas del select
 // del front) o '' si no se pudo decidir.
 
@@ -12,6 +12,19 @@ import { safeFetch, requireAuth } from './_security.js';
 import { getUserIdFromAuth } from './_supabase-server.js';
 
 const MODEL = 'claude-opus-5-5';
+
+// Palancas de oferta que se buscan en la landing (las mismas que el paso
+// "Ofertas" del alta en src/Arranque.jsx).
+const PALANCAS = {
+  precio: 'Precio (con moneda)',
+  descuento: 'Descuento o % OFF',
+  combo: '2x1, 3x2 o combo',
+  cuotas: 'Cuotas sin interés',
+  envio: 'Envío gratis',
+  garantia: 'Garantía o devolución',
+  regalo: 'Regalo con la compra',
+  urgencia: 'Urgencia o stock limitado',
+};
 
 // Las mismas claves que FORMATOS_PRODUCTO en src/Arranque.jsx.
 const FORMATOS = {
@@ -127,7 +140,7 @@ Reglas:
 - Basate en el producto que se vende (la foto, si está, manda), no en lo que se promete.
 - Si la página no alcanza para saberlo, devolvé formato "" en vez de adivinar.
 - "medidas": el tamaño real del producto si la página lo dice (alto, largo, diámetro, ml, g, cm), en una frase corta en español rioplatense y comparándolo con algo cotidiano si se puede (ej: "13 cm de largo, entra en la palma de la mano"). Si la página no lo dice, "".
-- "ofertas": las ofertas REALES que muestra la página, tal cual: precio (con moneda), descuentos, promos (2x1, combos), envío gratis, cuotas, garantía. Una por línea, sin inventar nada. Si no hay, "".
+- "palancas": para cada palanca de venta, si la página la muestra de verdad ("tiene") y el texto exacto a usar en un anuncio, corto ("texto", ej: "3 cuotas sin interés", "$29.900", "Envío gratis a todo el país"). Palancas: ${Object.entries(PALANCAS).map(([k, v]) => `${k} (${v})`).join(', ')}. Si no aparece, tiene=false y texto="". No inventes.
 - "motivo": una frase corta en español explicando qué te hizo elegir ese formato.`;
 
   const content = [];
@@ -149,10 +162,20 @@ Reglas:
             properties: {
               formato: { type: 'string', enum: ['', ...Object.keys(FORMATOS)] },
               medidas: { type: 'string' },
-              ofertas: { type: 'string' },
+              palancas: {
+                type: 'object',
+                properties: Object.fromEntries(Object.keys(PALANCAS).map(k => [k, {
+                  type: 'object',
+                  properties: { tiene: { type: 'boolean' }, texto: { type: 'string' } },
+                  required: ['tiene', 'texto'],
+                  additionalProperties: false,
+                }])),
+                required: Object.keys(PALANCAS),
+                additionalProperties: false,
+              },
               motivo: { type: 'string' },
             },
-            required: ['formato', 'medidas', 'ofertas', 'motivo'],
+            required: ['formato', 'medidas', 'palancas', 'motivo'],
             additionalProperties: false,
           },
         },
@@ -168,7 +191,10 @@ Reglas:
     return respondJSON(res, 200, {
       formato,
       medidas: String(out.medidas || '').slice(0, 200),
-      ofertas: String(out.ofertas || '').slice(0, 600),
+      palancas: Object.fromEntries(Object.keys(PALANCAS).map(k => {
+        const v = out.palancas?.[k] || {};
+        return [k, { tiene: !!v.tiene, texto: String(v.texto || '').slice(0, 120) }];
+      })),
       imagenUrl,
       motivo: String(out.motivo || '').slice(0, 300),
       leyoLanding: !!texto,

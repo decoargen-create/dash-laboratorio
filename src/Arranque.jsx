@@ -203,6 +203,21 @@ const FORMATOS_PRODUCTO = [
   ['otros', '❓ Otros (deja heurística)'],
 ];
 
+// Palancas de oferta del paso "Ofertas" del alta (mismas claves que
+// api/marketing/detectar-formato.js). Se marcan las que el producto tiene y
+// el generador usa 1 o 2 por estático, rotándolas entre variantes.
+const PALANCAS_OFERTA = [
+  ['precio', 'Precio', 'ej: $29.900'],
+  ['descuento', 'Descuento', 'ej: 30% OFF'],
+  ['combo', '2x1 o combo', 'ej: 2x1 · llevá 3 pagá 2'],
+  ['cuotas', 'Cuotas sin interés', 'ej: 3 cuotas sin interés'],
+  ['envio', 'Envío gratis', 'ej: Envío gratis a todo el país'],
+  ['garantia', 'Garantía o devolución', 'ej: 30 días de garantía'],
+  ['regalo', 'Regalo', 'ej: Neceser de regalo'],
+  ['urgencia', 'Urgencia', 'ej: Últimas unidades · Solo por hoy'],
+];
+const palancasVacias = () => Object.fromEntries(PALANCAS_OFERTA.map(([k]) => [k, { on: false, texto: '' }]));
+
 // Etiquetas cortas de la etapa de awareness del prospecto — para el chip
 // del header del workspace.
 const STAGE_LABEL = {
@@ -1455,7 +1470,7 @@ export default function ArranqueSection({ addToast, onGoToSection, modoAlta = fa
   useEffect(() => {
     try { localStorage.setItem('adslab-productos-vista', vista); } catch {}
   }, [vista]);
-  const [prodDraft, setProdDraft] = useState({ nombre: '', landingUrl: '', descripcion: '', formato: '', medidas: '', claves: '', ofertas: '' });
+  const [prodDraft, setProdDraft] = useState({ nombre: '', landingUrl: '', descripcion: '', formato: '', medidas: '', claves: '', ofertas: '', palancas: palancasVacias() });
   // Wizard de ALTA de producto (Kombialo OS, etapa 1): el producto nace
   // enchufado — cuenta publicitaria, campaña base de referencia, break-even
   // y primeros competidores, todo en el alta en vez de configurarse después.
@@ -1483,8 +1498,13 @@ export default function ArranqueSection({ addToast, onGoToSection, modoAlta = fa
       if (!r.ok) throw new Error(j.error || `Error ${r.status}`);
       setProdDraft(prev => ({ ...prev, formato: j.formato || prev.formato,
         medidas: prev.medidas.trim() ? prev.medidas : (j.medidas || ''),
-        ofertas: prev.ofertas.trim() ? prev.ofertas : (j.ofertas || '') }));
-      setDetFormato({ estado: 'listo', motivo: j.formato ? (j.motivo || '') : 'No me alcanzó la página para saberlo: elegilo vos.', imagenUrl: j.imagenUrl || '', ofertasIA: !!j.ofertas });
+        palancas: Object.fromEntries(PALANCAS_OFERTA.map(([k]) => {
+          const actual = prev.palancas?.[k] || { on: false, texto: '' };
+          const ia = j.palancas?.[k];
+          return [k, actual.on || actual.texto ? actual : { on: !!ia?.tiene, texto: ia?.texto || '' }];
+        })) }));
+      const detectadas = PALANCAS_OFERTA.filter(([k]) => j.palancas?.[k]?.tiene).length;
+      setDetFormato({ estado: 'listo', motivo: j.formato ? (j.motivo || '') : 'No me alcanzó la página para saberlo: elegilo vos.', imagenUrl: j.imagenUrl || '', ofertasIA: detectadas > 0 });
     } catch (e) {
       setDetFormato({ estado: 'error', motivo: e.message || 'No pude analizar el producto.' });
     }
@@ -1922,7 +1942,13 @@ export default function ArranqueSection({ addToast, onGoToSection, modoAlta = fa
       descripcion: prodDraft.descripcion.trim(),
       ...(prodDraft.formato ? { formato: prodDraft.formato } : {}),
       ...(prodDraft.medidas.trim() ? { medidas: prodDraft.medidas.trim() } : {}),
-      ...(prodDraft.ofertas.trim() ? { ofertasReales: prodDraft.ofertas.trim() } : {}),
+      ...(() => {
+        const lineas = PALANCAS_OFERTA
+          .filter(([k]) => prodDraft.palancas?.[k]?.on)
+          .map(([k, label]) => (prodDraft.palancas[k].texto || '').trim() || label);
+        if (prodDraft.ofertas.trim()) lineas.push(prodDraft.ofertas.trim());
+        return lineas.length ? { ofertasReales: lineas.join('\n'), palancas: prodDraft.palancas } : {};
+      })(),
       ...(prodDraft.claves.trim() ? { palabrasClave: prodDraft.claves.split(',').map(x => x.trim()).filter(Boolean) } : {}),
       competidores: comps,
       createdAt: new Date().toISOString(),
@@ -1937,7 +1963,7 @@ export default function ArranqueSection({ addToast, onGoToSection, modoAlta = fa
     if (Number.isFinite(be) && be > 0) nuevo.breakEven = be;
 
     setProductos(prev => [nuevo, ...prev]);
-    setProdDraft({ nombre: '', landingUrl: '', descripcion: '', formato: '', medidas: '', claves: '', ofertas: '' });
+    setProdDraft({ nombre: '', landingUrl: '', descripcion: '', formato: '', medidas: '', claves: '', ofertas: '', palancas: palancasVacias() });
     resetWizard();
     setShowProdForm(false);
     setActiveProductoId(String(nuevoId));
@@ -3426,11 +3452,30 @@ export default function ArranqueSection({ addToast, onGoToSection, modoAlta = fa
 
             {wizPaso === 4 && (
               <div className="space-y-3">
-                <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400 block">Tus ofertas reales</span>
-                <p className="text-[11px] text-gray-400 -mt-1">Precio, promos, envío gratis, cuotas: van tal cual en los creativos, en lugar de las ofertas del anuncio de referencia. Si lo dejás vacío, no se inventa ninguna.</p>
-                {detFormato.ofertasIA && <p className="text-[11.5px] rounded-md px-2.5 py-1.5 text-brand-300 bg-brand-500/10">Kombi: las saqué de tu landing. Revisalas antes de seguir.</p>}
-                <textarea value={prodDraft.ofertas} onChange={e => setProdDraft({ ...prodDraft, ofertas: e.target.value })} rows={4}
-                  placeholder={'ej:\n$29.900 con envío gratis\nHASTA 30% OFF\n3 cuotas sin interés'}
+                <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400 block">¿Qué le ofrecés a tu cliente?</span>
+                <p className="text-[11px] text-gray-400 -mt-1">Marcá lo que tiene tu producto. No van todas en cada estático: cada uno usa 1 o 2 y se van turnando entre variantes.</p>
+                {detFormato.ofertasIA && <p className="text-[11.5px] rounded-md px-2.5 py-1.5 text-brand-300 bg-brand-500/10">Kombi: marqué las que encontré en tu landing. Revisalas y completá lo que falte.</p>}
+                {detFormato.estado === 'leyendo' && <p className="text-[11.5px] text-gray-400 inline-flex items-center gap-1.5"><Loader2 size={11} className="animate-spin" /> Buscando ofertas en tu landing…</p>}
+                <div className="grid sm:grid-cols-2 gap-2">
+                  {PALANCAS_OFERTA.map(([k, label, ej]) => {
+                    const v = prodDraft.palancas?.[k] || { on: false, texto: '' };
+                    const set = (patch) => setProdDraft(d => ({ ...d, palancas: { ...(d.palancas || palancasVacias()), [k]: { ...v, ...patch } } }));
+                    return (
+                      <div key={k} className={`rounded-lg border px-2.5 py-2 transition ${v.on ? 'border-brand-500/60 bg-brand-500/5' : 'border-gray-700'}`}>
+                        <label className="flex items-center gap-2 text-[13px] font-semibold text-gray-200 cursor-pointer">
+                          <input type="checkbox" checked={v.on} onChange={e => set({ on: e.target.checked })} className="accent-[#009ffd]" />
+                          {label}
+                        </label>
+                        {v.on && (
+                          <input type="text" value={v.texto} onChange={e => set({ texto: e.target.value })} placeholder={ej}
+                            className="mt-1.5 w-full px-2 py-1 text-[12.5px] bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-1 focus:ring-brand-500" />
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+                <textarea value={prodDraft.ofertas} onChange={e => setProdDraft({ ...prodDraft, ofertas: e.target.value })} rows={2}
+                  placeholder="Otra oferta o claim (opcional)"
                   className="w-full px-2.5 py-1.5 text-sm bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-brand-500 resize-y" />
               </div>
             )}
@@ -3516,7 +3561,7 @@ export default function ArranqueSection({ addToast, onGoToSection, modoAlta = fa
             )}
 
             <div className="flex gap-2 justify-end">
-              <button onClick={() => { setShowProdForm(false); setProdDraft({ nombre: '', landingUrl: '', descripcion: '', formato: '', medidas: '', claves: '', ofertas: '' }); resetWizard(); }}
+              <button onClick={() => { setShowProdForm(false); setProdDraft({ nombre: '', landingUrl: '', descripcion: '', formato: '', medidas: '', claves: '', ofertas: '', palancas: palancasVacias() }); resetWizard(); }}
                 className="px-3 py-1.5 text-xs font-semibold text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md hover:bg-gray-50 transition">
                 Cancelar
               </button>
@@ -4380,7 +4425,7 @@ export default function ArranqueSection({ addToast, onGoToSection, modoAlta = fa
               No te pedimos stage (problem/solution/product-aware) porque lo inferimos solos del research doc cuando corras el pipeline.
             </p>
             <div className="flex gap-2 justify-end">
-              <button onClick={() => { setShowProdForm(false); setProdDraft({ nombre: '', landingUrl: '', descripcion: '', formato: '', medidas: '', claves: '', ofertas: '' }); }}
+              <button onClick={() => { setShowProdForm(false); setProdDraft({ nombre: '', landingUrl: '', descripcion: '', formato: '', medidas: '', claves: '', ofertas: '', palancas: palancasVacias() }); }}
                 className="px-3 py-1.5 text-xs font-semibold text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md hover:bg-gray-50 transition">
                 Cancelar
               </button>

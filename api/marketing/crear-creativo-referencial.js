@@ -846,7 +846,7 @@ async function planStrategyAndVariations({ apiKey, refImgBuf, refMime, producto,
       ? `**OFFER BRIEF (documento de oferta — big idea, oferta única, mecanismo, prueba, urgencia)**. Usá esto para el ÁNGULO y la propuesta de valor del creativo:\n${offerBriefDoc.slice(0, 1500)}`
       : '',
     ofertasReales
-      ? `**OFERTAS / PRECIOS / CLAIMS REALES DEL USUARIO** (estos son los ÚNICOS que podés mencionar — si el ad ref menciona algo distinto, REEMPLAZALO por esto):\n${ofertasReales.slice(0, 1500)}`
+      ? `**OFERTAS / PRECIOS / CLAIMS REALES DEL USUARIO** (estos son los ÚNICOS que podés mencionar — si el ad ref menciona algo distinto, REEMPLAZALO por esto). Son PALANCAS DISPONIBLES, no obligatorias: cada variante usa 1 o 2 (como máximo 3 si hay evento, contando el sello del evento), y entre variantes ROTÁ cuáles (una con el precio, otra con cuotas sin interés, otra con envío gratis, otra con el 2x1…). Nunca todas juntas en la misma pieza: saturan y bajan la conversión.\n${ofertasReales.slice(0, 1500)}`
       : '**SIN OFERTAS DECLARADAS** — si el ad ref menciona promos/precios/claims regulatorios, REMOVELOS (no los inventes).',
     accentColor ? `Color de acento de la marca: ${accentColor}` : '',
   ].filter(Boolean).join('\n');
@@ -1074,7 +1074,7 @@ async function extractSkeletonHaiku({ apiKey, refImgBuf, refMime, producto }) {
       ? `**OFFER BRIEF (documento de oferta — big idea, oferta única, mecanismo, prueba, urgencia)**. Usá esto para el ÁNGULO del creativo:\n${offerBriefDocV.slice(0, 1200)}`
       : '',
     ofertasReales
-      ? `**OFERTAS / PRECIOS / CLAIMS REALES DEL USUARIO** (estos son los ÚNICOS que podés mencionar — si el ad ref menciona algo distinto, REEMPLAZALO por esto, NO lo dejes literal):\n${ofertasReales.slice(0, 1500)}`
+      ? `**OFERTAS / PRECIOS / CLAIMS REALES DEL USUARIO** (estos son los ÚNICOS que podés mencionar — si el ad ref menciona algo distinto, REEMPLAZALO por esto, NO lo dejes literal). Son PALANCAS DISPONIBLES, no obligatorias: cada variante usa 1 o 2 (como máximo 3 si hay evento, contando el sello del evento), y entre variantes ROTÁ cuáles (una con el precio, otra con cuotas sin interés, otra con envío gratis, otra con el 2x1…). Nunca todas juntas en la misma pieza: saturan y bajan la conversión.\n${ofertasReales.slice(0, 1500)}`
       : '**SIN OFERTAS NI CLAIMS DECLARADOS** — NO inventes descuentos, % off, "comprá 3 y ahorrá", FDA, ANMAT, ni claims médicos.',
     fullContextV ? `**AVATAR + RESEARCH (foco de la landing)** (USAR para entender al target, sus pain points, objeciones, valores — y reescribir los textos para que LE HABLEN específicamente):\n${fullContextV.slice(0, 3000)}` : '',
   ].filter(Boolean).join('\n');
@@ -1403,6 +1403,7 @@ function buildPromptFromPlan({ producto, inspiracion, plan, variation, accentCol
     parts.push(`**USER'S REAL OFFERS / PRICES (use ONLY these in any text overlay — NEVER copy a price or promo from IMAGE 1)**:`);
     parts.push(ofertasReales.slice(0, 800).split('\n').map(line => `  • ${line}`).join('\n'));
     parts.push(`  • If IMAGE 1 shows a price or promo NOT in this list, DO NOT render that text — render the closest matching offer from the list above, or omit the text block entirely.`);
+    parts.push(`  • These are AVAILABLE offers, not a checklist: render ONLY the ones this variation uses in its BADGES / CTA above (1-2, max 3 with an event seal). Do NOT add the rest of the list.`);
   }
 
   if (accentColor) {
@@ -1594,6 +1595,7 @@ function buildPrompt({ producto, inspiracion, skeleton, accentColor, aspectRatio
     parts.push(`**USER'S REAL OFFERS / PRICES (use ONLY these in text overlays — NEVER copy a price or promo from IMAGE 1)**:`);
     parts.push(ofertasReales.slice(0, 800).split('\n').map(line => `  • ${line}`).join('\n'));
     parts.push(`  - If IMAGE 1 shows a price/promo NOT in this list, do NOT render it. Use the closest offer from the list above or omit the overlay.`);
+    parts.push(`  - These are AVAILABLE offers, not a checklist: render ONLY the 1-2 this piece uses (max 3 with an event seal). Do NOT stack the whole list.`);
     // Anti-duplicación: explícito al renderer que NO repita el mismo mensaje
     // en 2+ ribbons. El bug típico es "ENVÍO GRATIS" aparecer en un ribbon
     // arriba y otro abajo. Una sola pieza por mensaje, combinarlas en UN ribbon

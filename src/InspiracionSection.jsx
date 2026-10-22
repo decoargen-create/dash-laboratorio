@@ -610,6 +610,11 @@ function dedupAdsByImage(ads) {
 function BrandCard({ brand, ads, isScraping, adaptingAdIds, creandoAdIds, seleccionados, selectedOrder, usedAdIds, progressById, onScrape, onAdapt, onCrearReferencial, onToggleSelect, onSaveToBoard, onRemove, onClearProgress, onOcrWinners, onTranscribeVideos }) {
   const estados = useImgEstado();
   const vencidas = brand.__vencidas ?? ads.reduce((n, a) => n + (estados.get(a.id) === 'vencida' ? 1 : 0), 0);
+  // Si casi todas las imágenes que se probaron vencieron, la grilla es una
+  // pared de recuadros vacíos: se pliega y queda el aviso (con "Ver igual").
+  const probadas = ads.reduce((n, a) => n + (estados.has(a.id) ? 1 : 0), 0);
+  const casiTodoVencido = vencidas >= 6 && probadas > 0 && vencidas / probadas >= 0.8;
+  const [verIgual, setVerIgual] = useState(false);
   // onClearProgress se forwardea a BrandAdsGrid (que lo pasa a AdThumb) para
   // que el user pueda cerrar el overlay de error que ahora queda persistente.
   const isCompetidor = !!brand.isCompetidor;
@@ -740,8 +745,14 @@ function BrandCard({ brand, ads, isScraping, adaptingAdIds, creandoAdIds, selecc
         </button>
       )}
 
+      {casiTodoVencido && !verIgual && (
+        <button onClick={() => setVerIgual(true)} className="mt-2 text-[11.5px] text-gray-500 hover:text-gray-300 underline">
+          Ver igual los anuncios de esta marca
+        </button>
+      )}
+
       {/* Grilla de estáticos scrapeados */}
-      {ads.length > 0 && (
+      {ads.length > 0 && (!casiTodoVencido || verIgual) && (
         <BrandAdsGrid
           ads={ads}
           brandNombre={brand.nombre}
@@ -926,10 +937,10 @@ function AdThumb({ ad, brandNombre, brandId = null, isCompetidor = false, fresh 
         </div>
       )}
       {vencida && (
-        <div className="absolute inset-0 flex flex-col items-center justify-center gap-1 p-2 text-center bg-[#12121c] pointer-events-none">
-          <ImageIcon size={18} className="text-gray-500" />
-          <span className="text-[10.5px] font-semibold text-gray-400 leading-tight">Imagen vencida</span>
-          <span className="text-[9.5px] text-gray-500 leading-tight">Re-scrapeá la marca para traerla de nuevo</span>
+        <div className="absolute inset-0 z-[5] flex flex-col items-center justify-center gap-1 bg-[#12121c] pointer-events-none"
+          title="Meta borró esta imagen. Actualizá la marca para traerla de nuevo.">
+          <ImageIcon size={16} className="text-gray-600" />
+          <span className="text-[10.5px] font-semibold text-gray-500">Vencida</span>
         </div>
       )}
       {/* Indicador de imagen cacheada localmente — solo on-hover para no
@@ -942,7 +953,7 @@ function AdThumb({ ad, brandNombre, brandId = null, isCompetidor = false, fresh 
       {/* Selector numerado — siempre visible (más prominente que el checkbox).
           Cuando seleccionás muestra el ORDEN (1, 2, 3...) según el orden en
           que clickeaste. Sin selección, muestra un + suave. */}
-      {onToggleSelect && (
+      {onToggleSelect && !vencida && (
         <button
           onClick={(e) => { e.preventDefault(); e.stopPropagation(); onToggleSelect(); }}
           className={`absolute top-1.5 left-1.5 z-10 w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold transition-all shadow-md ${
@@ -1055,13 +1066,13 @@ function AdThumb({ ad, brandNombre, brandId = null, isCompetidor = false, fresh 
           </button>
         </div>
       </div>
-      {ad.daysRunning > 0 && (
+      {!vencida && ad.daysRunning > 0 && (
         <div className={`absolute bottom-1.5 left-1.5 px-1.5 py-0.5 text-[9.5px] font-bold rounded-full pointer-events-none group-hover/thumb:opacity-0 transition ${
           ad.daysRunning >= 30 ? 'bg-emerald-400/90 text-emerald-950' : 'bg-black/65 text-white'}`}>
           {ad.daysRunning} días
         </div>
       )}
-      {fresh && !used && (
+      {!vencida && fresh && !used && (
         <div className="absolute top-1 right-1 px-1 py-0.5 text-[8px] font-bold rounded bg-emerald-500 text-white pointer-events-none">
           NUEVO
         </div>
@@ -1083,6 +1094,9 @@ const fmtUsd = (v) => `US$ ${v.toLocaleString('es-AR', { minimumFractionDigits: 
 // Biblioteca general: última carga de las fuentes de TODOS los productos.
 // Vive a nivel módulo para que cambiar "Crear para" no la vacíe y recargue.
 let bibliotecaCache = { key: '', fuentes: [] };
+// Selección de la biblioteca: vive afuera del componente para que cambiar
+// "Crear para" (que vuelve a montar la sección) no borre lo elegido.
+let seleccionBiblioteca = [];
 const CARRIL_CLS = 'flex gap-2 overflow-x-auto pb-2 snap-x [&>*]:w-[180px] [&>*]:shrink-0 [&>*]:snap-start';
 
 function BrandAdsGrid({ ads, brandNombre, brandId = null, isCompetidor = false, adaptingAdIds, creandoAdIds, seleccionados, selectedOrder, usedAdIds, progressById, onAdapt, onCrearReferencial, onToggleSelect, onSaveToBoard, onClearProgress, onScrape, isScraping, brandTotalAds }) {
@@ -1790,7 +1804,8 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
   const [adaptingAdIds, setAdaptingAdIds] = useState(new Set());
   // Multi-select para bulk. Set preserva el orden de inserción → podemos
   // mostrar 1, 2, 3... en cada thumb según el orden en que el user clickeó.
-  const [seleccionados, setSeleccionados] = useState(new Set());
+  const [seleccionados, setSeleccionados] = useState(() => new Set(biblioteca ? seleccionBiblioteca : []));
+  useEffect(() => { if (biblioteca) seleccionBiblioteca = [...seleccionados]; }, [biblioteca, seleccionados]);
   // Map { adId → 1-based selection index } recomputado cada vez que cambia
   // la selección. Lo pasamos a cada AdThumb para que muestre el número.
   const selectedOrder = useMemo(() => {

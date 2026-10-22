@@ -26,8 +26,8 @@ import { confirmDialog } from './dialogs.jsx';
 import {
   Sparkles, Package, ChevronRight, ChevronDown, Plus, Trash2, Link2, X,
   Loader2, Download, Image as ImageIcon, ExternalLink, Wand2, Search,
-  Check, AlertCircle, LayoutGrid, Rows3, Table2, Settings2, RefreshCw,
-  Inbox, Bookmark,
+  Check, AlertCircle, LayoutGrid, Rows3, Columns3, Table2, Settings2, RefreshCw,
+  Inbox, Bookmark, AlertTriangle,
 } from 'lucide-react';
 import { logCostsFromResponse } from './costsStore.js';
 import { authHeaders } from './authFetch.js';
@@ -50,6 +50,7 @@ import { supabase } from './supabase.js';
 import { notifyMarketingChange } from './useMarketingSync.js';
 import { safeSetItem } from './safeStorage.js';
 import { setCompAds, getCompAds } from './competidorAdsIDB.js';
+import { productoVisible } from './productosVisibles.js';
 import { listBoards, createBoard, addItemsToBoard } from './marketingBoardsApi.js';
 // Galería ahora vive como tab independiente en el workspace (Arranque),
 // no más como modal acá.
@@ -607,6 +608,8 @@ function dedupAdsByImage(ads) {
 }
 
 function BrandCard({ brand, ads, isScraping, adaptingAdIds, creandoAdIds, seleccionados, selectedOrder, usedAdIds, progressById, onScrape, onAdapt, onCrearReferencial, onToggleSelect, onSaveToBoard, onRemove, onClearProgress, onOcrWinners, onTranscribeVideos }) {
+  const estados = useImgEstado();
+  const vencidas = ads.reduce((n, a) => n + (estados.get(a.id) === 'vencida' ? 1 : 0), 0);
   // onClearProgress se forwardea a BrandAdsGrid (que lo pasa a AdThumb) para
   // que el user pueda cerrar el overlay de error que ahora queda persistente.
   const isCompetidor = !!brand.isCompetidor;
@@ -628,6 +631,7 @@ function BrandCard({ brand, ads, isScraping, adaptingAdIds, creandoAdIds, selecc
                 comp
               </span>
             )}
+
             {(() => {
               // Badge "estable" — marcas que el smart scrape va a saltear porque
               // devolvieron 0 ads nuevos 3 veces seguidas. El user puede forzar
@@ -648,6 +652,11 @@ function BrandCard({ brand, ads, isScraping, adaptingAdIds, creandoAdIds, selecc
             })()}
           </div>
           <div className="flex items-center gap-1.5 text-[10px] text-gray-500 dark:text-gray-400 truncate">
+            {brand.__origen && (
+              <span className="shrink-0 px-1.5 py-px font-semibold bg-gray-100 dark:bg-gray-700/70 text-gray-500 dark:text-gray-300 rounded" title={`Cargada en ${brand.__origen}`}>
+                de {brand.__origen}
+              </span>
+            )}
             {brand.landingUrl && (
               <a href={brand.landingUrl} target="_blank" rel="noreferrer"
                 className="inline-flex items-center gap-0.5 text-brand-600 hover:underline truncate">
@@ -689,7 +698,7 @@ function BrandCard({ brand, ads, isScraping, adaptingAdIds, creandoAdIds, selecc
             onClick={onScrape}
             disabled={isScraping}
             className="inline-flex items-center gap-1 px-2 py-1 text-[10px] font-bold text-white bg-gradient-to-br from-amber-500 to-brand-500 rounded hover:from-amber-600 hover:to-brand-600 transition disabled:opacity-50 shrink-0"
-            title={brand.lastScraped ? 'Volver a scrapear' : 'Scrapear ads'}
+            title={`${brand.lastScraped ? 'Volver a scrapear' : 'Scrapear anuncios'} · cuesta ≈ ${fmtUsd(costoScrape(ads.length))} de Apify`}
           >
             {isScraping
               ? <><Loader2 size={10} className="animate-spin" /> Scrapeando…</>
@@ -717,6 +726,18 @@ function BrandCard({ brand, ads, isScraping, adaptingAdIds, creandoAdIds, selecc
             ? 'Sin estáticos activos en la biblioteca de anuncios en el último scrape.'
             : 'Todavía no se scrapeó — tocá Scrape para traer sus anuncios.'}
         </p>
+      )}
+
+      {vencidas > 0 && (
+        <button onClick={onScrape} disabled={isScraping}
+          className="mt-3 w-full flex items-center gap-2 rounded-lg border border-amber-400/40 bg-amber-500/10 px-3 py-2 text-left text-[12px] text-amber-200 hover:bg-amber-500/15 transition disabled:opacity-60"
+          title="Meta vence los links de imagen a las semanas. Re-scrapear trae links nuevos y desde ahora quedan guardados.">
+          <AlertTriangle size={14} className="shrink-0 text-amber-300" />
+          <span className="flex-1">
+            <b>{vencidas} imagen{vencidas === 1 ? '' : 'es'} vencida{vencidas === 1 ? '' : 's'}.</b>{' '}
+            {brand.__ajena ? `Re-scrapeala desde ${brand.__origen}` : 'Re-scrapeá para traerlas'} · cuesta ≈ {fmtUsd(costoScrape(ads.length))}
+          </span>
+        </button>
       )}
 
       {/* Grilla de estáticos scrapeados */}
@@ -754,6 +775,56 @@ function BrandCard({ brand, ads, isScraping, adaptingAdIds, creandoAdIds, selecc
 // (URL genuinamente expirada), recién ahí escondemos. Sin esto las miniaturas
 // de ads viejos/inactivos salían todas negras.
 // Orden de fuentes: copia guardada (no vence) → CDN de Meta → proxy → nada.
+// Estado de las imágenes de la biblioteca: adId → 'ok' | 'vencida'. Lo leen
+// la barra de progreso y cada miniatura (placeholder "Imagen vencida").
+const imgEstado = new Map();
+const imgSubs = new Set();
+function marcarImg(adId, estado) {
+  if (!adId || imgEstado.get(adId) === estado) return;
+  imgEstado.set(adId, estado);
+  imgSubs.forEach(fn => { try { fn(); } catch { /* listener roto */ } });
+}
+function useImgEstado() {
+  const [, force] = useState(0);
+  useEffect(() => {
+    let t = null;
+    const fn = () => { if (!t) t = setTimeout(() => { t = null; force(x => x + 1); }, 250); };
+    imgSubs.add(fn);
+    return () => { imgSubs.delete(fn); if (t) clearTimeout(t); };
+  }, []);
+  return imgEstado;
+}
+
+// Barra de progreso de la biblioteca: cuántas imágenes ya cargaron, cuántas
+// están vencidas (link de Meta caído, hay que re-scrapear) y cuántas faltan
+// (se cargan al bajar/deslizar).
+function ProgresoImagenes({ ads, cargandoMarcas }) {
+  const estados = useImgEstado();
+  const total = ads.length;
+  let ok = 0, vencidas = 0;
+  for (const a of ads) { const e = estados.get(a.id); if (e === 'ok') ok++; else if (e === 'vencida') vencidas++; }
+  if (!total && !cargandoMarcas) return null;
+  const pct = total ? Math.round(((ok + vencidas) / total) * 100) : 0;
+  const listo = total > 0 && ok + vencidas >= total;
+  return (
+    <div className="rounded-xl border border-[rgba(130,180,255,0.18)] bg-[#10101b] px-3.5 py-2.5">
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[12.5px]">
+        <span className="font-semibold text-gray-200">
+          {cargandoMarcas ? 'Trayendo todas las marcas…' : listo ? 'Biblioteca cargada' : 'Cargando imágenes…'}
+        </span>
+        <span className="text-gray-400 tabular-nums">{ok} de {total} cargadas</span>
+        {vencidas > 0 && <span className="text-amber-300 tabular-nums">{vencidas} vencidas (hay que re-scrapear su marca)</span>}
+        {!listo && total > 0 && <span className="text-gray-500">el resto carga a medida que bajás o deslizás</span>}
+      </div>
+      <div className="mt-2 h-1.5 rounded-full bg-[rgba(160,160,220,0.08)] overflow-hidden flex">
+        <div className="h-full bg-gradient-to-r from-brand-500 to-brand-700 transition-all duration-500" style={{ width: `${total ? (ok / total) * 100 : 0}%` }} />
+        <div className="h-full bg-amber-400/70 transition-all duration-500" style={{ width: `${total ? (vencidas / total) * 100 : 0}%` }} />
+      </div>
+      <span className="sr-only">{pct}%</span>
+    </div>
+  );
+}
+
 function handleAdImgError(e, cdnUrl) {
   const img = e.currentTarget;
   if (img.dataset.guardada === '1' && !img.dataset.step && cdnUrl) {
@@ -764,11 +835,13 @@ function handleAdImgError(e, cdnUrl) {
     img.src = `/api/marketing/proxy-image?url=${encodeURIComponent(cdnUrl)}`;
   } else {
     img.style.display = 'none';
+    marcarImg(img.dataset.adid, 'vencida');
   }
 }
 // Si se vio desde Meta (no desde la copia), se manda a guardar la copia.
 function handleAdImgLoad(e, adId, cdnUrl) {
   const img = e.currentTarget;
+  marcarImg(adId, 'ok');
   if (img.dataset.guardada !== '1' || img.dataset.step) pedirGuardarImagenAd(adId, cdnUrl);
 }
 
@@ -820,6 +893,8 @@ function AdThumb({ ad, brandNombre, brandId = null, isCompetidor = false, fresh 
     };
   }, [ad?.id]);
   const guardada = cachedUrl ? null : (ad.storedImageUrl || urlImagenGuardada(ad.id));
+  const estados = useImgEstado();
+  const vencida = estados.get(ad.id) === 'vencida';
   const thumb = cachedUrl || guardada || cdnThumb;
   return (
     <div
@@ -844,12 +919,19 @@ function AdThumb({ ad, brandNombre, brandId = null, isCompetidor = false, fresh 
     >
       {thumb ? (
         <img key={thumb} src={thumb} alt="" className="w-full h-full object-cover"
-          loading="lazy" decoding="async" data-guardada={guardada ? '1' : undefined}
-          onLoad={(e) => { if (!cachedUrl && cdnThumb) handleAdImgLoad(e, ad.id, cdnThumb); }}
+          loading="lazy" decoding="async" data-guardada={guardada ? '1' : undefined} data-adid={ad.id}
+          onLoad={(e) => { if (!cachedUrl && cdnThumb) handleAdImgLoad(e, ad.id, cdnThumb); else marcarImg(ad.id, 'ok'); }}
           onError={(e) => handleAdImgError(e, cdnThumb)} />
       ) : (
         <div className="w-full h-full flex items-center justify-center">
           <ImageIcon size={20} className="text-gray-300" />
+        </div>
+      )}
+      {vencida && (
+        <div className="absolute inset-0 flex flex-col items-center justify-center gap-1 p-2 text-center bg-[#12121c] pointer-events-none">
+          <ImageIcon size={18} className="text-gray-500" />
+          <span className="text-[10.5px] font-semibold text-gray-400 leading-tight">Imagen vencida</span>
+          <span className="text-[9.5px] text-gray-500 leading-tight">Re-scrapeá la marca para traerla de nuevo</span>
         </div>
       )}
       {/* Indicador de imagen cacheada localmente — solo on-hover para no
@@ -921,70 +1003,64 @@ function AdThumb({ ad, brandNombre, brandId = null, isCompetidor = false, fresh 
         </div>
       )}
 
-      {/* En mobile (max-md) los devices sin hover no pueden activar el overlay
-          → forzamos opacity 100 y un tinte oscuro para mantener contraste. */}
-      <div className="absolute inset-0 bg-black/0 group-hover/thumb:bg-black/60 max-md:bg-gradient-to-t max-md:from-black/70 max-md:to-transparent transition flex flex-col items-stretch justify-end gap-1 p-1.5">
-        {onCrearReferencial && (
-          <button
-            onClick={(e) => { e.preventDefault(); e.stopPropagation(); onCrearReferencial(); }}
-            disabled={creando}
-            className="opacity-0 group-hover/thumb:opacity-100 max-md:opacity-100 transition inline-flex items-center justify-center gap-1 px-2 py-1 text-[10px] font-bold text-white bg-brand-600 hover:bg-brand-700 rounded disabled:opacity-70"
-            title="Genera 2 variaciones con tu producto real"
+      {/* Anuncio limpio (prototipo 4B): solo la imagen; al pasar el mouse,
+          "Crear creativo" grande al centro y las acciones secundarias como
+          íconos abajo. En mobile (sin hover) se ven siempre, con degradé. */}
+      <div className="absolute inset-0 bg-black/0 group-hover/thumb:bg-black/65 max-md:bg-gradient-to-t max-md:from-black/70 max-md:to-transparent transition flex flex-col items-center justify-center gap-2 p-2">
+        <div className="absolute bottom-1.5 left-1.5 right-1.5 flex items-center justify-center gap-1 opacity-0 group-hover/thumb:opacity-100 max-md:opacity-100 transition">
+          {onCrearReferencial && (
+            <button
+              onClick={(e) => { e.preventDefault(); e.stopPropagation(); onCrearReferencial(); }}
+              disabled={creando}
+              className="h-7 inline-flex items-center gap-1 px-2.5 rounded-full text-[11px] font-bold text-white whitespace-nowrap bg-gradient-to-b from-brand-500 to-brand-700 shadow disabled:opacity-70"
+              title="Crear un creativo con tu producto basado en este anuncio"
+            >
+              {creando ? <Loader2 size={11} className="animate-spin" /> : <Sparkles size={11} />}
+              {creando ? 'Creando' : 'Crear'}
+            </button>
+          )}
+          {onAdapt && (
+            <button
+              onClick={(e) => { e.preventDefault(); e.stopPropagation(); onAdapt(); }}
+              disabled={adapting}
+              className="w-7 h-7 grid place-items-center rounded-full text-white bg-white/15 hover:bg-white/30 backdrop-blur disabled:opacity-60"
+              title="Sumar ideas (texto) a la Bandeja"
+            >
+              {adapting ? <Loader2 size={12} className="animate-spin" /> : <Wand2 size={12} />}
+            </button>
+          )}
+          <a
+            href={fbUrl} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()}
+            className="w-7 h-7 grid place-items-center rounded-full text-white bg-white/15 hover:bg-white/30 backdrop-blur"
+            title="Ver en la biblioteca de anuncios de Meta"
           >
-            {creando
-              ? <><Loader2 size={10} className="animate-spin" /> Generando…</>
-              : <><Sparkles size={10} /> Crear creativo</>
-            }
-          </button>
-        )}
-        {onAdapt && (
+            <ExternalLink size={12} />
+          </a>
+          {onSaveToBoard && isCompetidor && brandId && (
+            <button
+              onClick={(e) => { e.preventDefault(); e.stopPropagation(); onSaveToBoard(ad, { id: brandId, nombre: brandNombre }); }}
+              className="w-7 h-7 grid place-items-center rounded-full text-white bg-white/15 hover:bg-white/30 backdrop-blur"
+              title="Guardar en una colección"
+            >
+              <Bookmark size={12} />
+            </button>
+          )}
           <button
-            onClick={(e) => { e.preventDefault(); e.stopPropagation(); onAdapt(); }}
-            disabled={adapting}
-            className="opacity-0 group-hover/thumb:opacity-100 max-md:opacity-100 transition inline-flex items-center justify-center gap-1 px-2 py-1 text-[10px] font-semibold text-white bg-amber-500/90 hover:bg-amber-600 rounded disabled:opacity-70"
-            title="Genera ideas (texto) en la Bandeja"
+            onClick={(e) => {
+              e.preventDefault(); e.stopPropagation();
+              window.dispatchEvent(new CustomEvent('viora:toggle-used-ad', { detail: { adId: ad.id } }));
+            }}
+            className={`w-7 h-7 grid place-items-center rounded-full text-white backdrop-blur ${used ? 'bg-gray-500/80 hover:bg-gray-500' : 'bg-white/15 hover:bg-white/30'}`}
+            title={used ? 'Quitar marca de usado' : 'Marcar como usado (queda en gris)'}
           >
-            {adapting
-              ? <><Loader2 size={10} className="animate-spin" /> Adaptando…</>
-              : <><Wand2 size={10} /> + ideas en Bandeja</>
-            }
+            <Check size={12} />
           </button>
-        )}
-        <a
-          href={fbUrl} target="_blank" rel="noreferrer"
-          className="opacity-0 group-hover/thumb:opacity-100 max-md:opacity-100 transition inline-flex items-center justify-center gap-1 px-2 py-1 text-[10px] font-semibold text-white bg-black/70 hover:bg-black/90 rounded"
-        >
-          <ExternalLink size={10} /> Ver en FB
-        </a>
-        {/* Guardar en colección (board) — solo aparece cuando el ad es de un
-            competidor (boards requieren competidor_id en el schema). */}
-        {onSaveToBoard && isCompetidor && brandId && (
-          <button
-            onClick={(e) => { e.preventDefault(); e.stopPropagation(); onSaveToBoard(ad, { id: brandId, nombre: brandNombre }); }}
-            className="opacity-0 group-hover/thumb:opacity-100 max-md:opacity-100 transition inline-flex items-center justify-center gap-1 px-2 py-1 text-[10px] font-semibold text-white bg-amber-600/90 hover:bg-amber-700 rounded"
-            title="Guardar en una colección cross-producto"
-          >
-            <Bookmark size={10} /> Guardar
-          </button>
-        )}
-        {/* Toggle manual de "usado" — persiste por ad.id (Ad Archive ID),
-            sobrevive al re-scrapeo. Gris = ya lo usé. */}
-        <button
-          onClick={(e) => {
-            e.preventDefault(); e.stopPropagation();
-            window.dispatchEvent(new CustomEvent('viora:toggle-used-ad', { detail: { adId: ad.id } }));
-          }}
-          className={`opacity-0 group-hover/thumb:opacity-100 max-md:opacity-100 transition inline-flex items-center justify-center gap-1 px-2 py-1 text-[10px] font-semibold text-white rounded ${
-            used ? 'bg-gray-600 hover:bg-gray-700' : 'bg-emerald-600/90 hover:bg-emerald-700'
-          }`}
-          title={used ? 'Quitar marca de usado' : 'Marcar como usado (queda en gris)'}
-        >
-          <Check size={10} /> {used ? 'Marcado usado' : 'Marcar usado'}
-        </button>
+        </div>
       </div>
       {ad.daysRunning > 0 && (
-        <div className="absolute top-1 left-1 px-1.5 py-0.5 text-[9px] font-bold rounded bg-black/60 text-white pointer-events-none">
-          {ad.daysRunning}d
+        <div className={`absolute bottom-1.5 left-1.5 px-1.5 py-0.5 text-[9.5px] font-bold rounded-full pointer-events-none group-hover/thumb:opacity-0 transition ${
+          ad.daysRunning >= 30 ? 'bg-emerald-400/90 text-emerald-950' : 'bg-black/65 text-white'}`}>
+          {ad.daysRunning} días
         </div>
       )}
       {fresh && !used && (
@@ -1002,6 +1078,15 @@ function AdThumb({ ad, brandNombre, brandId = null, isCompetidor = false, fresh 
 }
 
 
+const VistaCarrilCtx = React.createContext(false);
+const APIFY_USD_POR_AD = 0.0058;
+const costoScrape = (nAds) => Math.max(20, Math.min(500, nAds || 0)) * APIFY_USD_POR_AD;
+const fmtUsd = (v) => `US$ ${v.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+// Biblioteca general: última carga de las fuentes de TODOS los productos.
+// Vive a nivel módulo para que cambiar "Crear para" no la vacíe y recargue.
+let bibliotecaCache = { key: '', fuentes: [] };
+const CARRIL_CLS = 'flex gap-2 overflow-x-auto pb-2 snap-x [&>*]:w-[180px] [&>*]:shrink-0 [&>*]:snap-start';
+
 function BrandAdsGrid({ ads, brandNombre, brandId = null, isCompetidor = false, adaptingAdIds, creandoAdIds, seleccionados, selectedOrder, usedAdIds, progressById, onAdapt, onCrearReferencial, onToggleSelect, onSaveToBoard, onClearProgress, onScrape, isScraping, brandTotalAds }) {
   const [showRepeated, setShowRepeated] = useState(false);
   // Paginación: arranca con 30, "ver más" suma de a 60 hasta cap razonable.
@@ -1014,6 +1099,7 @@ function BrandAdsGrid({ ads, brandNombre, brandId = null, isCompetidor = false, 
   const FRESH_LIMIT = Math.min(freshLimit, fresh.length);
   const REPEATED_LIMIT = Math.min(repeatedLimit, repeated.length);
   const PAGE_STEP = 60;
+  const carril = React.useContext(VistaCarrilCtx);
 
   return (
     <div className="mt-3 space-y-3">
@@ -1023,7 +1109,7 @@ function BrandAdsGrid({ ads, brandNombre, brandId = null, isCompetidor = false, 
           <p className="text-[10px] font-bold uppercase tracking-wider text-emerald-700 dark:text-emerald-400 mb-1.5 flex items-center gap-1">
             ✨ Nuevos del día <span className="text-gray-400 font-normal">({fresh.length})</span>
           </p>
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+          <div className={carril ? CARRIL_CLS : 'grid grid-cols-2 sm:grid-cols-3 gap-2'}>
             {fresh.slice(0, FRESH_LIMIT).map(ad => (
               <AdThumb
                 key={ad.id}
@@ -1113,7 +1199,7 @@ function BrandAdsGrid({ ads, brandNombre, brandId = null, isCompetidor = false, 
             Ya vistos ({repeated.length})
           </button>
           {showRepeated && (
-            <div className="mt-2 grid grid-cols-2 sm:grid-cols-3 gap-2 opacity-60">
+            <div className={`mt-2 opacity-60 ${carril ? CARRIL_CLS : 'grid grid-cols-2 sm:grid-cols-3 gap-2'}`}>
               {repeated.slice(0, REPEATED_LIMIT).map(ad => (
                 <AdThumb
                   key={ad.id}
@@ -1183,10 +1269,10 @@ function TopEscaladosBar({ items, adaptingAdIds, creandoAdIds, seleccionados, se
           <span className="text-base">🏆</span>
           <div className="flex-1 min-w-0">
             <p className="text-xs font-bold text-amber-900 dark:text-amber-200">
-              Top {items.length} escalados de tu competencia
+              Top {items.length}: los que más rinden de todas tus marcas
             </p>
             <p className="text-[10px] text-amber-700 dark:text-amber-300/80 truncate">
-              Rankeados por: días corriendo + variantes activas + multiplataforma + popularidad de marca
+              Ordenados por días activos, variantes, plataformas y popularidad de la marca: los que más probablemente venden
             </p>
           </div>
         </button>
@@ -1468,7 +1554,7 @@ function TopTableView({ items, seleccionados, selectedOrder, adaptingAdIds, crea
 
 
 
-export default function InspiracionSection({ addToast, forcedProductoId, embedded = false }) {
+export default function InspiracionSection({ addToast, forcedProductoId, embedded = false, biblioteca = false, sinDestino = false }) {
   // Refs de cleanup — guards contra setState en componente desmontado,
   // doble-click en bulk generate, y setTimeouts sin cancel al unmount.
   // Sin esto se filtraban warnings de React + memoria de timeouts colgados
@@ -1593,6 +1679,57 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
   // localStorage pero rompía quota con muchos ads. Ahora se hidratan desde
   // IDB (competidorAdsIDB) cuando el producto se monta o cambia.
   const [compAdsByCompId, setCompAdsByCompId] = useState({});
+  useEffect(() => { if (biblioteca && soloProbados) setSoloProbados(false); }, [biblioteca]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // BIBLIOTECA GENERAL (Estáticos → Inspiración): además de las marcas del
+  // producto elegido, se muestran las de TODOS los otros productos. No se
+  // mueve ningún dato: cada marca sigue guardada en el producto donde se
+  // cargó, y lo que se genera va al producto elegido en "Generar para".
+  // Fuentes de TODOS los productos visibles (incluido el elegido), cargadas
+  // de una sola vez y en paralelo: la biblioteca es la misma elija el
+  // producto que elija. Las del producto elegido se reemplazan después por
+  // sus versiones "vivas" (re-scrape, borrar) al armar la lista.
+  const bibKey = biblioteca ? productos.filter(productoVisible)
+    .map(p => `${p.id}:${(p.competidores || []).map(c => c.id).join(',')}:${loadBrands(p.id).length}`).join('|') : '';
+  const [ajenas, setAjenas] = useState(() => (biblioteca && bibliotecaCache.key === bibKey ? bibliotecaCache.fuentes : []));
+  const [cargandoBiblio, setCargandoBiblio] = useState(false);
+  // Filtros en chips de la biblioteca (prototipo 2A): de qué producto vino la
+  // marca y solo anuncios que ya llevan +30 días activos (probados).
+  const [origenFiltro, setOrigenFiltro] = useState('todas');
+  const [vistaMarcas, setVistaMarcas] = useState(() => {
+    try { return localStorage.getItem('adslab-inspiracion-vista') === 'carriles' ? 'carriles' : 'grilla'; } catch { return 'grilla'; }
+  });
+  useEffect(() => { try { localStorage.setItem('adslab-inspiracion-vista', vistaMarcas); } catch { /* sin storage */ } }, [vistaMarcas]);
+  const [min30, setMin30] = useState(false);
+  useEffect(() => {
+    if (!biblioteca) { setAjenas([]); return; }
+    if (bibliotecaCache.key === bibKey && bibliotecaCache.fuentes.length) { setAjenas(bibliotecaCache.fuentes); return; }
+    let cancelled = false;
+    setCargandoBiblio(true);
+    (async () => {
+      const porProducto = await Promise.all(productos.filter(productoVisible).map(async (p) => {
+        const origen = p.nombre || 'otro producto';
+        const comps = await Promise.all((p.competidores || []).map(async (c) => {
+          const rec = await getCompAds(p.id, c.id).catch(() => null);
+          return { key: `x-${p.id}-c-${c.id}`, prodId: String(p.id), srcId: `comp-${c.id}`, nombre: c.nombre, landingUrl: c.landingUrl, fbPageUrl: c.fbPageUrl,
+            lastScraped: c.lastAdsCheck, isCompetidor: true, origen, ads: rec?.ads?.length ? rec.ads : (c.ads || []) };
+        }));
+        const marcas = await Promise.all(loadBrands(p.id).map(async (b) => {
+          const rec = await getCompAds(p.id, `brand-${b.id}`).catch(() => null);
+          return { key: `x-${p.id}-b-${b.id}`, prodId: String(p.id), srcId: b.id, nombre: b.nombre, landingUrl: b.landingUrl, fbPageUrl: b.fbPageUrl,
+            lastScraped: b.lastScraped, isCompetidor: false, origen, ads: rec?.ads || [] };
+        }));
+        return [...comps, ...marcas];
+      }));
+      const fuentes = porProducto.flat();
+      bibliotecaCache = { key: bibKey, fuentes };
+      if (!cancelled) { setAjenas(fuentes); setCargandoBiblio(false); }
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [biblioteca, bibKey]);
+  // Ads de las marcas de otros productos, en el formato que usa el bulk.
+  const adsDeAjenas = () => ajenas.flatMap(f => (f.ads || []).map(ad => ({ brandNombre: f.nombre, ad })));
 
   // Hidratar ads de competidores desde IDB.
   // - PRIORITY: IDB primero, inline legacy solo si IDB vacía.
@@ -2085,7 +2222,6 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
           landingUrl: producto.landingUrl,
           research: producto.docs?.research,
           avatar: producto.docs?.avatar,
-          activoVisual: producto.activoVisual,
         },
         inspiracion: { brandNombre, ad },
       }),
@@ -2111,6 +2247,8 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
   };
 
   const handleAdapt = async (brandNombre, ad) => {
+    // Biblioteca sin producto elegido: se puede mirar y elegir, no generar.
+    if (sinDestino) { addToast?.({ type: 'info', message: 'Primero elegí arriba para qué producto querés generar.' }); return; }
     if (!producto) return;
     setAdaptingAdIds(prev => new Set(prev).add(ad.id));
     const execId = startExecution({
@@ -2245,6 +2383,8 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
   };
 
   const crearReferencialDeAd = async (brandNombre, ad, { skipCategoryWarn = false, silentExecution = false, planPrecargado = null } = {}) => {
+    // Biblioteca sin producto elegido: se puede mirar y elegir, no generar.
+    if (sinDestino) { addToast?.({ type: 'info', message: 'Primero elegí arriba para qué producto querés generar.' }); return; }
     if (!producto) return false;
     // RED DE SEGURIDAD (bug Femflora): si el ad de referencia parece de otra
     // categoría (pies/uñas/cara) que el producto (íntimo/etc.), avisamos ANTES
@@ -2638,6 +2778,8 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
   // poblar la Bandeja con ideas inspiradas en los winners de la
   // competencia antes de decidir cuáles vale la pena generar.
   const handleBulkAdapt = async () => {
+    // Biblioteca sin producto elegido: se puede mirar y elegir, no generar.
+    if (sinDestino) { addToast?.({ type: 'info', message: 'Primero elegí arriba para qué producto querés generar.' }); return; }
     if (bulkAdaptingRef.current) {
       addToast?.({ type: 'info', message: 'Ya hay un bulk adapt corriendo. Esperá a que termine.' });
       return;
@@ -2659,7 +2801,7 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
         .filter(a => seleccionados.has(a.id))
         .map(a => ({ brandNombre, ad: a }));
     });
-    adsAGenerarRaw.push(...adsCompetidores, ...adsCustom);
+    adsAGenerarRaw.push(...adsCompetidores, ...adsCustom, ...adsDeAjenas().filter(x => seleccionados.has(x.ad.id)));
     // Dedupe por ad.id (mismo motivo que en handleBulkCrear: un ad puede
     // matchear en dos fuentes y se adaptaría/gastaría 2 veces).
     const vistosAdapt = new Set();
@@ -2721,6 +2863,8 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
   };
 
   const handleBulkCrear = async () => {
+    // Biblioteca sin producto elegido: se puede mirar y elegir, no generar.
+    if (sinDestino) { addToast?.({ type: 'info', message: 'Primero elegí arriba para qué producto querés generar.' }); return; }
     // Guard contra doble-click. Sin esto, dos workers procesaban el mismo
     // index del queue por race en nextIndex → ads generados 2x o skipped.
     if (bulkRunningRef.current) {
@@ -2779,6 +2923,7 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
       for (const lista of Object.values(adsByBrand)) {
         for (const a of (lista || [])) if (seleccionados.has(a.id)) selAds.push(a);
       }
+      for (const { ad } of adsDeAjenas()) if (seleccionados.has(ad.id)) selAds.push(ad);
       mismCount = selAds.filter(a => checkAdProductMismatch(producto, a).mismatch).length;
     } catch {}
     // Confirmación con el modal propio (BulkConfirmModal, diseño Panel) en
@@ -2831,7 +2976,8 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
         .filter(a => seleccionados.has(a.id))
         .map(a => ({ brandNombre, ad: a }));
     });
-    adsAGenerarRaw.push(...adsCompetidores, ...adsCustom);
+    adsAGenerarRaw.push(...adsCompetidores, ...adsCustom,
+      ...adsDeAjenas().filter(x => seleccionados.has(x.ad.id) && (x.ad.imageUrls?.length || 0) > 0));
 
     // DEDUPE por ad.id — CAUSA RAÍZ del runaway. Un mismo ad puede matchear
     // en dos lados: el mismo ad scrapeado bajo dos competidores, o presente en
@@ -3866,8 +4012,37 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
           if (n && compNombres.has(n)) return false;
           return true;
         });
-        let unif = [...competidoresUnif, ...customDeduped];
-
+        // Biblioteca general: SIEMPRE todas las marcas de todos los productos,
+        // en el mismo orden, elija el producto que elija. Las que son del
+        // producto elegido se toman "vivas" (se pueden re-scrapear/borrar).
+        let unif;
+        if (biblioteca && ajenas.length) {
+          const vivos = new Map([...competidoresUnif, ...customUnif].map(b => [String(b.id), b]));
+          const hostDe = (u) => (u || '').replace(/^https?:\/\//, '').replace(/^www\./, '').split('/')[0];
+          const vistos = new Set();
+          unif = [];
+          for (const f of ajenas) {
+            const h = hostDe(f.landingUrl); const n = (f.nombre || '').toLowerCase().trim();
+            if ((h && vistos.has(h)) || (n && vistos.has(n))) continue;
+            if (h) vistos.add(h); if (n) vistos.add(n);
+            const vivo = f.prodId === String(producto.id) ? vivos.get(String(f.srcId)) : null;
+            if (vivo) { unif.push({ ...vivo, __origen: f.origen }); continue; }
+            const staticAds = (f.ads || []).filter(a =>
+              (a.imageUrls?.length || 0) > 0 && (a.videoUrls?.length || 0) === 0
+              && (!soloProbados || a.daysRunning == null || a.daysRunning >= MIN_DAYS_PROBADO));
+            unif.push({ id: f.key, nombre: f.nombre, landingUrl: f.landingUrl, fbPageUrl: f.fbPageUrl,
+              lastScraped: f.lastScraped, isCompetidor: f.isCompetidor, __ads: dedupAdsByImage(staticAds),
+              __origen: f.origen, __ajena: true });
+          }
+        } else {
+          unif = [...competidoresUnif, ...customDeduped].map(b => (biblioteca ? { ...b, __origen: b.__origen || producto.nombre } : b));
+        }
+        // Chips de la biblioteca: origen y +30 días
+        if (biblioteca && origenFiltro !== 'todas') unif = unif.filter(b => b.__origen === origenFiltro);
+        if (biblioteca && min30) {
+          unif = unif.map(b => ({ ...b, __ads: (b.__ads || []).filter(a => (a.daysRunning || 0) >= 30) }))
+            .filter(b => b.__ads.length > 0);
+        }
         // Filtros
         if (tipoFiltro === 'competidor') unif = unif.filter(b => b.isCompetidor);
         else if (tipoFiltro === 'custom') unif = unif.filter(b => !b.isCompetidor);
@@ -3898,7 +4073,11 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
         }
 
         // Ordenamiento
+        // Las marcas sin anuncios o con pocos (<3) van al final, sea cual sea
+        // el orden elegido (pedido 22/10).
+        const nivel = (b) => { const n = b.__ads?.length || 0; return n === 0 ? 2 : n < 3 ? 1 : 0; };
         unif = [...unif].sort((a, b) => {
+          if (nivel(a) !== nivel(b)) return nivel(a) - nivel(b);
           if (orderBy === 'nombre') return (a.nombre || '').localeCompare(b.nombre || '');
           if (orderBy === 'ads-count') return (b.__ads?.length || 0) - (a.__ads?.length || 0);
           // default 'reciente': lastScraped desc, sin scrape al final
@@ -3948,6 +4127,39 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
               />
             )}
 
+            {biblioteca && <ProgresoImagenes ads={unif.flatMap(b => (b.__ads || []).slice(0, 30))} cargandoMarcas={cargandoBiblio} />}
+            {biblioteca && (() => {
+              const origenes = [...new Set([...ajenas.map(f => f.origen), producto.nombre].filter(Boolean))];
+              const chip = (on) => `px-3.5 py-1.5 rounded-full border text-[12.5px] font-semibold transition ${on
+                ? 'bg-brand-500/15 border-brand-500 text-brand-300'
+                : 'border-[rgba(130,180,255,0.22)] text-gray-300 hover:bg-brand-500/10'}`;
+              return (
+                <div className="flex flex-wrap items-center gap-2">
+                  <button className={chip(origenFiltro === 'todas')} onClick={() => setOrigenFiltro('todas')} title="Muestra las marcas de todos tus productos">Todas las marcas</button>
+                  {cargandoBiblio && <span className="inline-flex items-center gap-1.5 text-[12px] text-gray-400"><Loader2 size={12} className="animate-spin" /> Trayendo todas las marcas…</span>}
+                  {origenes.map(o => (
+                    <button key={o} className={chip(origenFiltro === o)} onClick={() => setOrigenFiltro(origenFiltro === o ? 'todas' : o)}
+                      title={`Marcas cargadas en ${o}`}>
+                      De {o}
+                    </button>
+                  ))}
+                  <span className="w-px h-5 bg-gray-700 mx-1" />
+                  <button className={chip(min30)} onClick={() => setMin30(v => !v)}
+                    title="Solo anuncios que ya llevan 30 días o más activos: los que más probablemente venden">
+                    +30 días activo
+                  </button>
+                  <span className="ml-auto inline-flex items-center gap-1 p-1 rounded-[10px] border border-[rgba(130,180,255,0.22)]">
+                    {[['grilla', 'Hacia abajo', LayoutGrid], ['carriles', 'Hacia la derecha', Columns3]].map(([v, l, Ic]) => (
+                      <button key={v} onClick={() => setVistaMarcas(v)} title={v === 'grilla' ? 'Tres marcas por fila, bajando' : 'Marcas una al lado de la otra: deslizá hacia la derecha para ver más'}
+                        className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-[7px] text-[12px] font-semibold transition ${vistaMarcas === v ? 'bg-brand-500/20 text-brand-300' : 'text-gray-400 hover:text-gray-200'}`}>
+                        <Ic size={13} /> {l}
+                      </button>
+                    ))}
+                  </span>
+                </div>
+              );
+            })()}
+
             {/* Toolbar consolidada (Stripe/Linear) — search + filtros + counter + acciones
                 en una sola línea. Reemplaza la antigua barra de filtros + los botones
                 Galería/Agregar marca del header. Densidad alta. */}
@@ -3956,7 +4168,7 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
                 <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
                 <input
                   type="text" value={query} onChange={e => setQuery(e.target.value)}
-                  placeholder="Buscar — marca, URL, body, OCR, audio del video…"
+                  placeholder="Buscar marca, texto del anuncio o lo que dice el video…"
                   className="w-full pl-7 pr-7 py-1.5 text-xs bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded focus:outline-none focus:ring-1 focus:ring-amber-500"
                 />
                 {searchingServer && (
@@ -3969,29 +4181,31 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
                   </p>
                 )}
               </div>
+              {!biblioteca && (<>
               <select value={tipoFiltro} onChange={e => setTipoFiltro(e.target.value)}
                 className="px-2 py-1.5 text-xs bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded">
-                <option value="all">Todos</option>
-                <option value="competidor">Competidores</option>
-                <option value="custom">Custom</option>
+                <option value="all">Marcas: todas</option>
+                <option value="competidor">Solo competencia</option>
+                <option value="custom">Solo las que agregaste a mano</option>
               </select>
               <select value={estadoFiltro} onChange={e => setEstadoFiltro(e.target.value)}
                 className="px-2 py-1.5 text-xs bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded">
-                <option value="all">Todos</option>
-                <option value="con-ads">Con ads</option>
-                <option value="sin-scrapear">Sin scrapear</option>
+                <option value="all">Estado: todas</option>
+                <option value="con-ads">Con anuncios</option>
+                <option value="sin-scrapear">Sin actualizar todavía</option>
               </select>
               <select value={orderBy} onChange={e => setOrderBy(e.target.value)}
                 className="px-2 py-1.5 text-xs bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded">
-                <option value="reciente">Reciente</option>
-                <option value="ads-count">Más ads</option>
-                <option value="nombre">Nombre</option>
+                <option value="reciente">Orden: actualizadas hace poco</option>
+                <option value="ads-count">Orden: más anuncios</option>
+                <option value="nombre">Orden: nombre (A-Z)</option>
               </select>
-              <span className="text-[10px] tabular-nums text-gray-500 dark:text-gray-400 px-1">
-                {unif.length}
+              </>)}
+              <span className="text-[11px] tabular-nums text-gray-500 dark:text-gray-400 px-1">
+                {unif.length} marca{unif.length === 1 ? '' : 's'}
               </span>
-              {/* Separador visual + acciones primarias */}
-              <div className="w-px h-5 bg-gray-200 dark:bg-gray-700 mx-1" aria-hidden />
+              {/* Segunda fila: acciones (crear y actualizar), separadas de los filtros */}
+              <div className="basis-full h-0" aria-hidden />
               {/* Opciones de generación — popover con variantes/ratio/quality.
                   Antes solo se veían en la barra de bulk; ahora siempre accesibles. */}
               <div className="relative">
@@ -4000,7 +4214,7 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
                   className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-bold text-gray-700 dark:text-gray-200 bg-gray-100 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded hover:bg-gray-200 dark:hover:bg-gray-600 transition"
                   title={`Opciones de generación · ${genOpts.n || 2} var · ${genOpts.size === '1024x1536' ? 'Portrait' : '1:1'} · ${genOpts.quality}`}
                 >
-                  <Settings2 size={11} /> {genOpts.n || 2}v · {genOpts.size === '1024x1536' ? '9:16' : '1:1'} · {genOpts.quality === 'low' ? 'L' : genOpts.quality === 'medium' ? 'M' : 'H'}
+                  <Settings2 size={11} /> Cómo crear: {genOpts.n || 2} variante{(genOpts.n || 2) === 1 ? '' : 's'} · {genOpts.size === '1024x1536' ? 'vertical 9:16' : genOpts.size === '2048x2048' ? '2K' : 'cuadrado 1:1'} · calidad {genOpts.quality === 'low' ? 'baja' : genOpts.quality === 'medium' ? 'media' : 'alta'}
                 </button>
                 {showGenOpts && (
                   <div className="absolute top-full right-0 mt-1.5 z-40 w-64 bg-white dark:bg-gray-800 border-2 border-brand-300 dark:border-brand-700 rounded-lg shadow-2xl p-3"
@@ -4142,7 +4356,9 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
                 };
                 const isScrapeable = (b) => b.fbPageUrl || b.landingUrl || isKeywordUsable(b.nombre);
 
-                const eligibles = unif.filter(isScrapeable);
+                // En la biblioteca, las marcas de otros productos se actualizan
+                // desde su producto (acá no hay contexto para guardarlas).
+                const eligibles = unif.filter(b => isScrapeable(b) && !b.__ajena);
                 const smartEligibles = eligibles.filter(b => isStaleEnough(b) && !isStable(b));
                 const skippedByCache = eligibles.length - smartEligibles.length;
 
@@ -4178,7 +4394,7 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
                     {/* Toggle: solo ads "probados" (≥5 días corriendo). Los
                         ads con <5 días suelen ser tests sin validar. Filtra el
                         display; el scrape igual trae todos los activos. */}
-                    <button
+                    {!biblioteca && <button
                       onClick={() => setSoloProbados(v => !v)}
                       className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-semibold rounded border transition ${
                         soloProbados
@@ -4187,27 +4403,27 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
                       }`}
                       title="Solo muestra ads ACTIVOS con al menos 5 días corriendo (los que el advertiser ya validó). Apagá para ver también los tests recién lanzados."
                     >
-                      {soloProbados ? '✓ ' : ''}≥5 días
-                    </button>
+                      {soloProbados ? '✓ ' : ''}Solo probados (5+ días)
+                    </button>}
                     <button
                       disabled={scrapingBrandIds.size > 0 || smartEligibles.length === 0}
                       onClick={onSmart}
                       className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-bold text-white bg-gradient-to-br from-purple-500 to-pink-500 rounded hover:from-purple-600 hover:to-pink-600 shadow-sm transition disabled:opacity-50 disabled:cursor-not-allowed"
-                      title={`Scrapea solo marcas no scrapeadas en las últimas ${STALE_HOURS}h y que no son estables (${STABLE_THRESHOLD}+ scrapes sin novedad).${skippedByCache > 0 ? ` ${skippedByCache} saltadas por cache.` : ''}`}
+                      title={`Trae los anuncios nuevos de las marcas que no se actualizaron en las últimas ${STALE_HOURS} h (saltea las que no cambian hace ${STABLE_THRESHOLD} actualizaciones). Lo cobra Apify, ≈ US$ 0,0058 por anuncio.${skippedByCache > 0 ? ` ${skippedByCache} ya están al día.` : ''}`}
                     >
                       {scrapingBrandIds.size > 0
                         ? <><Loader2 size={11} className="animate-spin" /> Scrapeando {scrapingBrandIds.size}…</>
-                        : <><Download size={11} /> Scrape nuevas ({smartEligibles.length})</>}
+                        : <><Download size={11} /> Actualizar marcas ({smartEligibles.length}) · ≈ {fmtUsd(smartEligibles.reduce((t, b) => t + costoScrape(b.__ads?.length), 0))}</>}
                     </button>
                     <button
                       disabled={scrapingBrandIds.size > 0 || eligibles.length === 0}
                       onClick={onForce}
                       className="inline-flex items-center gap-1.5 px-2 py-1.5 text-xs font-semibold text-purple-700 dark:text-purple-300 bg-white dark:bg-gray-800 border border-purple-300 dark:border-purple-700 rounded hover:bg-purple-50 dark:hover:bg-purple-900/20 transition disabled:opacity-50 disabled:cursor-not-allowed"
-                      title="Re-scrapea TODAS las marcas ignorando cache de 24h y estables. Gasta más cuota de Apify."
+                      title={`Actualiza TODAS las marcas aunque se hayan actualizado hoy · ≈ ${fmtUsd(eligibles.reduce((t, b) => t + costoScrape(b.__ads?.length), 0))} de Apify`}
                     >
                       {scrapingBrandIds.size > 0
                         ? <><Loader2 size={11} className="animate-spin" /> En curso…</>
-                        : <><RefreshCw size={11} /> Forzar todas</>}
+                        : <><RefreshCw size={11} /> Actualizar todas ({eligibles.length})</>}
                     </button>
                   </>
                 );
@@ -4217,13 +4433,14 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
                   derivadas de producto.competidores via el useEffect de sync. */}
               <button
                 onClick={() => {
+                  if (biblioteca) { setShowAddForm(true); return; }
                   try { window.dispatchEvent(new CustomEvent('viora:product-tab', { detail: { tab: 'setup' } })); } catch {}
                   addToast?.({ type: 'info', message: 'Cargá la marca como competidor — va a aparecer acá automático.' });
                 }}
                 className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-bold text-white bg-gradient-to-br from-amber-500 to-brand-500 rounded hover:from-amber-600 hover:to-brand-600 shadow-sm transition"
-                title="Las marcas se agregan desde Competencia. Click para ir."
+                title={biblioteca ? 'Sumá una marca que haga buenos anuncios (de cualquier rubro): queda en la biblioteca para todos los productos' : 'Las marcas se agregan desde Competencia. Click para ir.'}
               >
-                <Plus size={11} /> Marca (en Competencia)
+                <Plus size={11} /> {biblioteca ? 'Agregar marca' : 'Marca (en Competencia)'}
               </button>
             </div>
 
@@ -4243,7 +4460,10 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
                 }}
               />
             ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+              <VistaCarrilCtx.Provider value={false}>
+              <div className={biblioteca && vistaMarcas === 'carriles'
+                ? 'flex items-start gap-4 overflow-x-auto pb-3 snap-x [&>*]:w-[400px] [&>*]:max-w-[85vw] [&>*]:shrink-0 [&>*]:snap-start'
+                : 'grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4'}>
                 {unif.map(b => (
                   <BrandCard
                     key={b.id}
@@ -4256,20 +4476,23 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
                     selectedOrder={selectedOrder}
                     usedAdIds={mergedUsedAdIds}
                     progressById={progressById}
-                    onScrape={() => b.isCompetidor ? handleScrapeCompetidor(b) : handleScrapeBrand(b)}
+                    onScrape={() => (b.__ajena
+                      ? addToast?.({ type: 'info', message: `Esta marca se actualiza desde ${b.__origen}: elegilo en "Generar para" y scrapeala.` })
+                      : b.isCompetidor ? handleScrapeCompetidor(b) : handleScrapeBrand(b))}
                     onOcrWinners={() => handleOcrTopWinners(b)}
                     onTranscribeVideos={() => handleTranscribeTopVideos(b)}
                     onAdapt={(ad) => handleAdapt(b.nombre, ad)}
                     onCrearReferencial={(ad) => crearReferencialDeAd(b.nombre, ad)}
                     onToggleSelect={(adId) => toggleSeleccion(adId)}
                     onSaveToBoard={(ad, brandInfo) => setBoardPickerData({ ad, brand: brandInfo, productoId: producto.id })}
-                    onRemove={b.isCompetidor ? null : () => handleRemoveBrand(b.id)}
+                    onRemove={b.isCompetidor || b.__ajena ? null : () => handleRemoveBrand(b.id)}
                     onClearProgress={(adId) => setProgressById(prev => {
                       const next = { ...prev }; delete next[adId]; return next;
                     })}
                   />
                 ))}
               </div>
+              </VistaCarrilCtx.Provider>
             )}
           </div>
         );

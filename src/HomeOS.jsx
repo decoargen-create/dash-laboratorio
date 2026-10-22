@@ -22,13 +22,13 @@ import {
 import { supabase } from './supabase.js';
 import { MetaConnectButton } from './MetaConnect.jsx';
 import { entregasNuevas } from './produccionStore.js';
+import { soloVisibles } from './productosVisibles.js';
 import CreativaDashboard from './CreativaDashboard.jsx';
-import PulpoKombi from './PulpoKombi.jsx';
 
 const PRODUCTOS_KEY = 'adslab-marketing-productos-v1';
 
 function readProductos() {
-  try { return JSON.parse(localStorage.getItem(PRODUCTOS_KEY) || '[]'); } catch { return []; }
+  try { return soloVisibles(JSON.parse(localStorage.getItem(PRODUCTOS_KEY) || '[]')); } catch { return []; }
 }
 async function authHeaders() {
   const base = { 'Content-Type': 'application/json' };
@@ -48,8 +48,9 @@ function useHoy(productos) {
   const cuentas = useMemo(() => {
     const m = new Map();
     for (const p of productos) {
-      const acc = p.metaAccount;
-      if (acc?.id && !m.has(acc.id)) m.set(acc.id, { id: acc.id, connId: acc.connId || null });
+      for (const acc of [p.metaAccount, ...(Array.isArray(p.metaAccounts) ? p.metaAccounts : [])]) {
+        if (acc?.id && !m.has(acc.id)) m.set(acc.id, { id: acc.id, connId: acc.connId || null });
+      }
     }
     return [...m.values()];
   }, [productos]);
@@ -75,16 +76,18 @@ function useHoy(productos) {
           id: p.id,
           nombre: p.nombre || p.name,
           n: norm(p.nombre || p.name),
+          claves: (Array.isArray(p.palabrasClave) ? p.palabrasClave : []).map(norm).filter(Boolean),
           breakEven: Number(p.breakEven || p.cortes?.roasMinimo) || 1.6,
           spend: 0, compras: 0, revenue: 0, campanas: 0, malo: 0,
         }))
-        .filter(p => p.n.length >= 3);
+        .filter(p => p.n.length >= 3 || p.claves.length);
       let sinMatch = 0;
       const tot = { spend: 0, compras: 0, revenue: 0, malo: 0, campBien: 0, campMal: 0 };
       for (const r of rows) {
         const cn = norm(r.name);
         tot.spend += r.spend; tot.compras += r.compras; tot.revenue += r.revenue;
-        const p = prods.find(x => cn.includes(x.n));
+        // Primero las palabras clave del Setup; si ninguna engancha, el nombre.
+        const p = prods.find(x => x.claves.some(k => cn.includes(k))) || prods.find(x => x.n.length >= 3 && cn.includes(x.n));
         const be = p?.breakEven || 1.6;
         const esMalo = r.spend > 0 && r.roas < be;
         if (esMalo) { tot.malo += r.spend; tot.campMal++; }
@@ -291,17 +294,6 @@ export default function HomeOS({ nombre, onNavigate, addToast }) {
 
   return (
     <div className="p-4 md:p-8 space-y-6 max-w-6xl">
-      {/* Saludo de Kombi (la cara de la IA de Kombialo). */}
-      <header className="flex items-center gap-4 animate-fade-in-up">
-        <PulpoKombi size={64} />
-        <div className="min-w-0">
-          <p className="text-[11px] font-extrabold uppercase tracking-[.06em] text-gray-400">Kombi · tu copiloto de anuncios</p>
-          <h2 className="text-2xl md:text-[26px] font-extrabold tracking-tight text-gray-900 dark:text-gray-100 truncate">
-            {saludoHora()}{nombre ? `, ${String(nombre).split(' ')[0]}` : ''}
-          </h2>
-          <p className="text-sm text-gray-500 dark:text-gray-400">Esto es lo que pasa hoy en tus anuncios.</p>
-        </div>
-      </header>
       {/* ── 1. Primeros pasos ─────────────────────────────────────────── */}
       {!cargandoPasos && pendientes > 0 && (
         <section className="rounded-2xl border border-violet-300/40 dark:border-violet-700/40 bg-violet-500/5 p-4 md:p-5">
@@ -407,8 +399,7 @@ export default function HomeOS({ nombre, onNavigate, addToast }) {
         )}
       </section>
 
-      {/* ── 3. Área creativa — el resumen del mes vive acá (híbrido):
-             tarjetas por producto, publicables y pagos, sin salir del Home. */}
+      {/* ── 3. Área creativa: tarjetas por producto, publicables y pagos. */}
       <section>
         <CreativaDashboard embedded addToast={addToast} />
       </section>

@@ -126,6 +126,24 @@ function EscalarTab({ addToast }) {
   );
 }
 
+// Escalar ADS como sección propia del menú (Anuncios → Escalar ADS): el
+// mismo wizard de recetas (CBO Deep Pocket, Cost Cap, ABO Bid/Cost Cap).
+export function EscalarSection({ addToast }) {
+  return (
+    <div className="max-w-5xl mx-auto px-4 py-6 space-y-6">
+      <div>
+        <h1 className="text-2xl font-black text-gray-900 dark:text-white flex items-center gap-2">
+          <TrendingUp size={22} className="text-brand-500" /> Escalar ADS
+        </h1>
+        <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+          Armá campañas de escalado con tus ganadores: CBO Deep Pocket, Cost Cap, ABO Bid Cap o ABO Cost Cap.
+        </p>
+      </div>
+      <EscalarTab addToast={addToast} />
+    </div>
+  );
+}
+
 // Videos publicables de una tarjeta: archivos con origen real (Drive o
 // storage). Los aprobados van primero — son los que el modal pre-tilda.
 function videosDe(a) {
@@ -134,7 +152,7 @@ function videosDe(a) {
 
 export default function PublicarSection({ addToast }) {
   const [, setTick] = useState(0);
-  const [tab, setTab] = useState('cola'); // 'cola' | 'escalar' | 'historial'
+  const [tab, setTab] = useState('cola'); // 'cola' | 'historial' (Escalar tiene su propia sección)
   useEffect(() => subscribeProduccion(() => setTick(t => t + 1)), []);
 
   const asignaciones = listAllAssignments();
@@ -219,7 +237,7 @@ export default function PublicarSection({ addToast }) {
 
       <div className="flex gap-1.5">
         {/* Pestañas chicas tipo filtro (prototipo 1-C elegido por el user). */}
-        {[['cola', 'Publicar', Rocket], ['escalar', 'Escalar', TrendingUp], ['historial', 'Historial', History]].map(([k, label, Icono]) => (
+        {[['cola', 'Publicar', Rocket], ['historial', 'Historial', History]].map(([k, label, Icono]) => (
           <button key={k} onClick={() => setTab(k)}
             className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-[12.5px] font-bold rounded-lg transition ${tab === k
               ? 'bg-brand-600 text-white'
@@ -229,8 +247,7 @@ export default function PublicarSection({ addToast }) {
         ))}
       </div>
 
-      {tab === 'escalar' ? <EscalarTab addToast={addToast} />
-        : tab === 'historial' ? <HistorialTab addToast={addToast} /> : grupos.length === 0 ? (
+      {tab === 'historial' ? <HistorialTab addToast={addToast} /> : grupos.length === 0 ? (
         <div className="rounded-2xl border border-dashed border-gray-300 dark:border-gray-700 p-10 text-center text-gray-500 dark:text-gray-400">
           <PackageOpen size={34} className="mx-auto mb-3 opacity-60" />
           <p className="font-semibold">No hay tarjetas aprobadas sin publicar.</p>

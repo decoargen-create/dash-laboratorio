@@ -22,7 +22,7 @@ import {
   Package, Target, Play, Check, Loader2, AlertTriangle, ChevronRight, ChevronDown,
   Plus, X, Sparkles, Link2, Search, Clock, Inbox, Trash2, Upload, Download, Activity,
   LayoutGrid, List as ListIcon, BarChart3, Copy, Pencil, MoreHorizontal, Users, History,
-  Plug,
+  Plug, Settings,
 } from 'lucide-react';
 // Conexión con Meta: estado compartido con el botón del header.
 import { useMetaConnections, openMetaConnect, authHeaders as metaAuthHeaders } from './MetaConnect.jsx';
@@ -124,6 +124,7 @@ import { trackQuotaFailure, isQuotaError, removeFromQuotaQueue } from './quotaRe
 import AnimatedCounter from './AnimatedCounter.jsx';
 import { getSyncStatus, subscribeSyncStatus } from './syncStatusStore.js';
 import ProductoCostsModal from './ProductoCostsModal.jsx';
+import { soloVisibles } from './productosVisibles.js';
 import ProductoHistorialModal from './ProductoHistorialModal.jsx';
 
 // Avatar del producto: muestra el pote (foto cargada en Setup) y cae al
@@ -174,6 +175,33 @@ function ProductAvatar({ id, nombre, producto = null, sizeClass = 'w-12 h-12', r
     </div>
   );
 }
+
+// Formato físico del producto (lo usan el alta y el Setup).
+const FORMATOS_PRODUCTO = [
+  ['', '— No seleccionado (heurística) —'],
+  ['gomitas', '🟢 Gomitas / gummies'],
+  ['cápsulas', '💊 Cápsulas / softgels / pastillas'],
+  ['comprimidos', '⚪ Comprimidos / tabletas'],
+  ['polvo', '🥄 Polvo (mix)'],
+  ['gotas', '💧 Gotas / liquid drops'],
+  ['shot', '🥤 Shot líquido'],
+  ['sachet', '📦 Sachet / stick individual'],
+  ['sérum', '🧴 Sérum'],
+  ['crema', '🪞 Crema / loción / emulsión'],
+  ['aceite', '🛢️ Aceite'],
+  ['bálsamo', '💄 Bálsamo'],
+  ['spray', '🌬️ Spray'],
+  ['stick', '📍 Stick / barra'],
+  ['mascarilla', '🎭 Mascarilla / máscara'],
+  ['parches', '🩹 Parches'],
+  ['cepillo', '🪮 Cepillo / masajeador / gua sha'],
+  ['gadget', '🔌 Gadget / dispositivo'],
+  ['herramienta', '🛠️ Herramienta / accesorio'],
+  ['textil', '🧣 Textil / prenda'],
+  ['hogar', '🏠 Hogar / organizador'],
+  ['jardin', '🌿 Jardín / exterior (luces, deco)'],
+  ['otros', '❓ Otros (deja heurística)'],
+];
 
 // Etiquetas cortas de la etapa de awareness del prospecto — para el chip
 // del header del workspace.
@@ -594,10 +622,11 @@ function RunHistoryCard({ history, onClear }) {
 // ("demasiada info"): el user la abre solo si la necesita. El estado
 // abierto/cerrado se persiste.
 const FLOW_STEPS = [
-  { emoji: '⚙️', tab: 'setup', titulo: 'Setup', desc: 'Cargá el producto (foto, oferta) y sus competidores.' },
+  { emoji: '⚙️', tab: null, titulo: 'Nueva carga', desc: 'En Estáticos → Nueva carga: cargás el producto (foto, oferta, formato) y sus competidores.' },
   { emoji: '▶️', tab: null, titulo: 'Analizar y generar ideas', desc: 'Miramos los anuncios ganadores de tu competencia y te armamos ideas.' },
   { emoji: '📥', tab: 'bandeja', titulo: 'Bandeja', desc: 'Revisás cada idea y generás el creativo ahí mismo.' },
-  { emoji: '🎨', tab: 'creativos', titulo: 'Creativos', desc: 'Ves los estáticos generados, listos para descargar.' },
+  { emoji: '✨', tab: null, titulo: 'Inspiración', desc: 'En Estáticos → Inspiración: elegís anuncios de referencia de cualquier marca y generás para el producto que quieras.' },
+  { emoji: '🖼️', tab: null, titulo: 'Galería', desc: 'En Estáticos → Galería: los estáticos generados de cada producto, listos para descargar.' },
 ];
 
 function FlowGuide() {
@@ -670,9 +699,7 @@ function ProductTabs({ activeTab, onChange }) {
       id: 'datos',
       label: 'Datos',
       tabs: [
-        { id: 'setup', label: 'Setup', emoji: '⚙️' },
         { id: 'documentos', label: 'Documentos', emoji: '📄' },
-        { id: 'campanas', label: 'Campañas', emoji: '📈' },
       ],
     },
     {
@@ -680,10 +707,11 @@ function ProductTabs({ activeTab, onChange }) {
       label: 'Creación',
       tabs: [
         { id: 'bandeja', label: 'Bandeja', emoji: '📥' },
-        { id: 'inspiracion', label: 'Inspiración', emoji: '✨' },
-        { id: 'creativos', label: 'Creativos', emoji: '🎨' },
-        { id: 'guiones', label: 'Guiones IA', emoji: '🎬' },
-        { id: 'galeria', label: 'Galería', emoji: '🖼️' },
+        // Creativos: oculta por ahora (pedido del user 22/10). La pestaña y
+        // su contenido siguen vivos; para volver, descomentar esta línea.
+        // { id: 'creativos', label: 'Creativos', emoji: '🎨' },
+        // Guiones IA: oculta por ahora (pedido del user 22/10), igual que Creativos.
+        // { id: 'guiones', label: 'Guiones IA', emoji: '🎬' },
       ],
     },
   ];
@@ -988,7 +1016,7 @@ function StepRow({ step, liveIdeas, onRerun, rerunBusy = false }) {
 }
 
 
-export default function ArranqueSection({ addToast, onGoToSection }) {
+export default function ArranqueSection({ addToast, onGoToSection, modoAlta = false }) {
   // Mientras se traen los productos de la nube (login en una PC nueva o con
   // la caché vacía) NO mostramos el onboarding de "primer producto": confundía,
   // parecía que se habían borrado todos. Mostramos un "trayendo…" en su lugar.
@@ -1112,7 +1140,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
   // Se persiste por producto para que volver al mismo producto te lleve al
   // último tab que estabas viendo.
   const productoTabKey = activeProductoId ? `adslab-marketing-prod-tab-${activeProductoId}` : null;
-  const [productoTab, setProductoTab] = useState('setup');
+  const [productoTab, setProductoTab] = useState('bandeja');
   // Bumpeamos esta key para forzar el remount de la Bandeja embebida cuando
   // el generador rápido inserta ideas — así aparecen sin recargar la página.
   const [bandejaRefreshKey, setBandejaRefreshKey] = useState(0);
@@ -1120,14 +1148,17 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
   // loop vive acá (no en la pestaña Bandeja) para que sobreviva al cambio
   // de pestaña dentro del workspace.
   useEffect(() => {
-    if (!productoTabKey) { setProductoTab('setup'); return; }
-    // Tabs retiradas (dashboard, competencia) caen a 'setup' — competencia
-    // ahora vive como sección dentro de Setup.
-    const REMOVED = ['dashboard', 'competencia'];
+    if (!productoTabKey) { setProductoTab('bandeja'); return; }
+    // Tabs retiradas (dashboard, competencia, campañas) caen a 'setup' —
+    // competencia vive dentro de Setup; las campañas se ven en Anuncios →
+    // Métricas (pedido del user 22/10: estaba de más en el producto).
+    // El Setup salió de las pestañas: vive en Estáticos → Nueva carga.
+    // Inspiración también salió: es la biblioteca general (Estáticos → Inspiración).
+    const REMOVED = ['dashboard', 'competencia', 'campanas', 'creativos', 'guiones', 'setup', 'inspiracion', 'galeria'];
     try {
-      const saved = localStorage.getItem(productoTabKey) || 'setup';
-      setProductoTab(REMOVED.includes(saved) ? 'setup' : saved);
-    } catch { setProductoTab('setup'); }
+      const saved = localStorage.getItem(productoTabKey) || 'bandeja';
+      setProductoTab(REMOVED.includes(saved) ? 'bandeja' : saved);
+    } catch { setProductoTab('bandeja'); }
   }, [productoTabKey]);
   useEffect(() => {
     if (productoTabKey) try { localStorage.setItem(productoTabKey, productoTab); } catch {}
@@ -1161,8 +1192,18 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
     };
     const onTab = (e) => {
       const tab = e?.detail?.tab;
-      // Tabs retiradas caen a 'setup' (competencia ahora vive ahí).
-      if (tab) setProductoTab(['dashboard', 'competencia'].includes(tab) ? 'setup' : tab);
+      // La Galería y la Inspiración ahora son secciones del menú: se abre la
+      // sección (la Galería, con el producto activo ya elegido).
+      if (tab === 'galeria' || tab === 'inspiracion') {
+        try {
+          const pid = localStorage.getItem('adslab-marketing-active-product');
+          if (pid && tab === 'galeria') localStorage.setItem('adslab-galeria-producto', pid);
+        } catch {}
+        onGoToSection?.(tab === 'galeria' ? 'mk-galeria' : 'mk-inspiracion');
+        return;
+      }
+      // Tabs retiradas caen a la Bandeja.
+      if (tab) setProductoTab(['dashboard', 'competencia', 'setup'].includes(tab) ? 'bandeja' : tab);
     };
     window.addEventListener('viora:product-select', onSelect);
     window.addEventListener('viora:product-tab', onTab);
@@ -1176,10 +1217,10 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
   // progreso detallado del pipeline — el pill flotante sería redundante.
   // En cualquier otro tab (o sin producto activo), dejamos el pill visible.
   useEffect(() => {
-    const inSetup = !!activeProductoId && productoTab === 'setup';
+    const inSetup = !!activeProductoId && modoAlta;
     pipelineRun.setSuppressOverlay?.(inSetup);
     return () => pipelineRun.setSuppressOverlay?.(false);
-  }, [activeProductoId, productoTab]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [activeProductoId, modoAlta]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Producto activo derivado + competidores + cuenta Meta del producto activo.
   const producto = productos.find(p => String(p.id) === String(activeProductoId)) || null;
@@ -1413,7 +1454,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
   useEffect(() => {
     try { localStorage.setItem('adslab-productos-vista', vista); } catch {}
   }, [vista]);
-  const [prodDraft, setProdDraft] = useState({ nombre: '', landingUrl: '', descripcion: '' });
+  const [prodDraft, setProdDraft] = useState({ nombre: '', landingUrl: '', descripcion: '', formato: '', medidas: '', claves: '' });
   // Wizard de ALTA de producto (Kombialo OS, etapa 1): el producto nace
   // enchufado — cuenta publicitaria, campaña base de referencia, break-even
   // y primeros competidores, todo en el alta en vez de configurarse después.
@@ -1421,6 +1462,25 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
   const [wizCx, setWizCx] = useState({ accountId: '', accountName: '', currency: '', connId: null, campanaBaseId: '', campanaBaseName: '', breakEven: '1.60', comp1: '', comp2: '' });
   const [wizCampanas, setWizCampanas] = useState([]);
   const [wizCampLoading, setWizCampLoading] = useState(false);
+  // Estáticos → Nueva carga: entra directo al alta del producto (el setup de
+  // siempre como primer paso). Al crear o cancelar, vuelve a Productos.
+  // Si se llega desde "Editar setup" de un producto, abre el setup de ese.
+  useEffect(() => {
+    if (!modoAlta) return;
+    let editar = null;
+    try { editar = localStorage.getItem('adslab-setup-producto'); localStorage.removeItem('adslab-setup-producto'); } catch {}
+    if (editar && productos.some(p => String(p.id) === String(editar))) {
+      setActiveProductoId(String(editar));
+      setShowProdForm(false);
+      return;
+    }
+    setActiveProductoId(null);
+    setShowProdForm(true);
+    setWizPaso(1);
+  }, [modoAlta]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Desde el setup (Nueva carga), los atajos a otras pestañas abren el
+  // producto en Productos con esa pestaña.
+  const irATab = (t) => { setProductoTab(t); if (modoAlta) setTimeout(() => onGoToSection?.('mk-arranque'), 0); };
   const resetWizard = () => { setWizPaso(1); setWizCx({ accountId: '', accountName: '', currency: '', connId: null, campanaBaseId: '', campanaBaseName: '', breakEven: '1.60', comp1: '', comp2: '' }); setWizCampanas([]); };
   const cargarCampanasWizard = async (accId, connId) => {
     setWizCampanas([]);
@@ -1813,6 +1873,9 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
       nombre,
       landingUrl,
       descripcion: prodDraft.descripcion.trim(),
+      ...(prodDraft.formato ? { formato: prodDraft.formato } : {}),
+      ...(prodDraft.medidas.trim() ? { medidas: prodDraft.medidas.trim() } : {}),
+      ...(prodDraft.claves.trim() ? { palabrasClave: prodDraft.claves.split(',').map(x => x.trim()).filter(Boolean) } : {}),
       competidores: comps,
       createdAt: new Date().toISOString(),
     };
@@ -1826,7 +1889,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
     if (Number.isFinite(be) && be > 0) nuevo.breakEven = be;
 
     setProductos(prev => [nuevo, ...prev]);
-    setProdDraft({ nombre: '', landingUrl: '', descripcion: '' });
+    setProdDraft({ nombre: '', landingUrl: '', descripcion: '', formato: '', medidas: '', claves: '' });
     resetWizard();
     setShowProdForm(false);
     setActiveProductoId(String(nuevoId));
@@ -3168,8 +3231,10 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
               <Package size={20} />
             </div>
             <div>
-              <h2 className="text-lg font-bold text-gray-900 dark:text-gray-100">Tus productos</h2>
-              <p className="text-xs text-gray-500 dark:text-gray-400">Cada producto tiene su propia competencia, research y bandeja de ideas.</p>
+              <h2 className="text-lg font-bold text-gray-900 dark:text-gray-100">{modoAlta ? 'Nueva carga' : 'Tus productos'}</h2>
+              <p className="text-xs text-gray-500 dark:text-gray-400">{modoAlta
+                ? 'Cargá un producto nuevo y completá su setup.'
+                : 'Cada producto tiene su propia competencia, research y bandeja de ideas.'}</p>
             </div>
           </div>
           <div className="flex items-center gap-2">
@@ -3220,7 +3285,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
               onDiagnostico={() => setShowDiagnostico(true)}
               onImportar={() => importFileInputRef.current?.click()}
             />
-            <button onClick={() => setShowProdForm(true)}
+            <button onClick={() => (modoAlta ? setShowProdForm(true) : onGoToSection?.('mk-nueva-carga'))}
               className="btn-fluo inline-flex items-center gap-1.5 px-4 py-2.5 text-sm font-bold text-white bg-gradient-to-br from-brand-500 to-brand-700 rounded-lg hover:from-brand-600 hover:to-brand-800 shadow-sm">
               <Plus size={16} /> Nuevo producto
             </button>
@@ -3235,7 +3300,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
             <div className="flex items-center gap-3 flex-wrap">
               <h3 className="text-sm font-bold text-gray-900 dark:text-gray-100">Nuevo producto</h3>
               <div className="flex gap-1.5 ml-auto">
-                {[[1, 'El producto'], [2, 'Conexiones'], [3, 'Competencia']].map(([n, lbl]) => (
+                {[[1, 'El producto'], [2, 'Formato'], [3, 'Conexiones'], [4, 'Competencia']].map(([n, lbl]) => (
                   <span key={n} className={`inline-flex items-center gap-1.5 text-[10.5px] font-bold px-2.5 py-1 rounded-full border ${
                     wizPaso === n ? 'border-brand-500 bg-brand-50 dark:bg-brand-900/30 text-brand-700 dark:text-brand-300'
                       : wizPaso > n ? 'border-emerald-300 dark:border-emerald-800 text-emerald-600 dark:text-emerald-400'
@@ -3262,6 +3327,33 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
 
             {wizPaso === 2 && (
               <div className="space-y-3">
+                <div>
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400 block mb-1">Formato del producto</span>
+                  <select value={prodDraft.formato} onChange={e => setProdDraft({ ...prodDraft, formato: e.target.value })}
+                    className="w-full px-2.5 py-1.5 text-sm bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-brand-500">
+                    {FORMATOS_PRODUCTO.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+                  </select>
+                  <p className="text-[11px] text-gray-400 mt-1">Así el generador dibuja tu producto como es (no las cápsulas del anuncio de referencia).</p>
+                </div>
+                <div>
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400 block mb-1">Tamaño real / medidas · opcional</span>
+                  <input type="text" value={prodDraft.medidas} onChange={e => setProdDraft({ ...prodDraft, medidas: e.target.value })}
+                    placeholder="ej: 13 cm de largo, entra en la palma de la mano"
+                    className="w-full px-2.5 py-1.5 text-sm bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-brand-500" />
+                  <p className="text-[11px] text-gray-400 mt-1">Cuánto mide y con qué se compara: así sale del tamaño correcto en todos los creativos.</p>
+                </div>
+              </div>
+            )}
+
+            {wizPaso === 3 && (
+              <div className="space-y-3">
+                <div>
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400 block mb-1">Palabras clave de las campañas</span>
+                  <input type="text" value={prodDraft.claves} onChange={e => setProdDraft({ ...prodDraft, claves: e.target.value })}
+                    placeholder="ej: aceite, oil"
+                    className="w-full px-2.5 py-1.5 text-sm bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-brand-500" />
+                  <p className="text-[11px] text-gray-400 mt-1">Toda campaña cuyo nombre tenga alguna de estas palabras se trackea para este producto.</p>
+                </div>
                 <div>
                   <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400 block mb-1">Cuenta publicitaria · opcional</span>
                   {!metaConnected ? (
@@ -3310,7 +3402,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
               </div>
             )}
 
-            {wizPaso === 3 && (
+            {wizPaso === 4 && (
               <div className="space-y-3">
                 <div>
                   <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400 block mb-1">Competidores a monitorear · opcional</span>
@@ -3334,7 +3426,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
             )}
 
             <div className="flex gap-2 justify-end">
-              <button onClick={() => { setShowProdForm(false); setProdDraft({ nombre: '', landingUrl: '', descripcion: '' }); resetWizard(); }}
+              <button onClick={() => { setShowProdForm(false); setProdDraft({ nombre: '', landingUrl: '', descripcion: '', formato: '', medidas: '', claves: '' }); resetWizard(); }}
                 className="px-3 py-1.5 text-xs font-semibold text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md hover:bg-gray-50 transition">
                 Cancelar
               </button>
@@ -3344,10 +3436,14 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
                   ← Atrás
                 </button>
               )}
-              {wizPaso < 3 ? (
+              {wizPaso < 4 ? (
                 <button onClick={() => {
                   if (wizPaso === 1 && !prodDraft.nombre.trim()) { addToast?.({ type: 'error', message: 'Ponele nombre al producto' }); return; }
-                  if (wizPaso === 1 && metaConnected && availableAccounts.length === 0 && !loadingAccounts) loadAdAccounts();
+                  if (wizPaso === 2 && metaConnected && availableAccounts.length === 0 && !loadingAccounts) loadAdAccounts();
+                  if (wizPaso === 2 && !prodDraft.claves.trim()) {
+                    const primera = prodDraft.nombre.trim().split(/\s+/).find(w => w.length >= 4) || '';
+                    if (primera) setProdDraft(d => ({ ...d, claves: primera.toLowerCase() }));
+                  }
                   setWizPaso(p => p + 1);
                 }}
                   className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-bold text-white bg-gradient-to-br from-brand-500 to-brand-700 rounded-md hover:from-brand-600 hover:to-brand-800 transition">
@@ -3363,8 +3459,8 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
           </div>
         )}
 
-        {/* Lista de productos existentes */}
-        {productos.length === 0 && sincronizando ? (
+        {/* Lista de productos existentes (en Nueva carga no: ahí solo el setup) */}
+        {modoAlta ? null : productos.length === 0 && sincronizando ? (
           <div className="border border-gray-200 dark:border-gray-700 rounded-2xl p-10 flex flex-col items-center gap-3 text-center">
             <Loader2 size={22} className="animate-spin text-brand-500" />
             <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">Trayendo tus productos…</p>
@@ -3403,7 +3499,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
               </div>
 
               <div className="flex flex-col sm:flex-row items-center justify-center gap-2.5">
-                <button onClick={() => setShowProdForm(true)}
+                <button onClick={() => (modoAlta ? setShowProdForm(true) : onGoToSection?.('mk-nueva-carga'))}
                   className="inline-flex items-center gap-2 px-6 py-3 text-sm font-bold text-white bg-gradient-to-br from-brand-500 to-brand-700 rounded-xl hover:from-brand-600 hover:to-brand-800 shadow-md transition">
                   <Plus size={16} /> Crear mi primer producto
                 </button>
@@ -3462,7 +3558,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
                   {hasResearch ? '✓ Documentado' : '○ Sin research'}
                 </span>
               );
-              const stagePill = p.stage ? (
+              const stagePill = null && p.stage ? (
                 <span className="inline-flex items-center px-1.5 py-0.5 text-[9px] font-semibold rounded bg-brand-50 dark:bg-brand-900/30 text-brand-700 dark:text-brand-300">
                   {(STAGE_LABEL[p.stage] || p.stage).replace('_', '-')}
                 </span>
@@ -3653,11 +3749,6 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
                       {/* Un solo chip de estado (research) + stage en texto sutil. */}
                       <div className="flex items-center gap-2 mt-0.5">
                         {researchPill}
-                        {stagePill && (
-                          <span className="text-[10px] text-gray-400 dark:text-gray-500 truncate">
-                            {(STAGE_LABEL[p.stage] || p.stage).replace('_', '-')}
-                          </span>
-                        )}
                       </div>
                       {/* Barra de avance de descargas — visible en toda pantalla. */}
                       {cc.total > 0 && (
@@ -3753,11 +3844,6 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
                       <p className="text-sm font-bold text-gray-900 dark:text-gray-100 truncate">{p.nombre}</p>
                       <div className="flex items-center gap-2 mt-1">
                         {researchPill}
-                        {stagePill && (
-                          <span className="text-[10px] text-gray-400 dark:text-gray-500 truncate">
-                            {(STAGE_LABEL[p.stage] || p.stage).replace('_', '-')}
-                          </span>
-                        )}
                       </div>
                     </div>
                   </div>
@@ -3797,8 +3883,9 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
               const tb = Date.parse(b.createdAt || b.created_at || 0) || 0;
               return ta - tb || String(a.id).localeCompare(String(b.id));
             };
-            const productosOrd = [...productos].sort(stableCmp);
-            const conResp = productosOrd.filter(p => (p.responsable || '').trim());
+            const productosOrd = soloVisibles(productos).sort(stableCmp);
+            // Una sola lista para todos (pedido 22/10): sin grupos por responsable.
+            const conResp = [];
             if (conResp.length === 0) {
               return <div className={contClass}>{productosOrd.map(renderProductoCard)}</div>;
             }
@@ -3943,15 +4030,19 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
         <div className="flex-1 min-w-0">
           <p className="text-[10px] font-semibold uppercase tracking-wider text-gray-400 dark:text-gray-500">
             <button onClick={() => setActiveProductoId(null)} className="hover:text-brand-500 transition">Productos</button>
-            <span className="mx-1">/</span>Workspace
+            <span className="mx-1">/</span>{modoAlta ? 'Setup' : 'Workspace'}
           </p>
           <h2 className="text-xl font-bold text-gray-900 dark:text-gray-100 truncate leading-tight">{producto.nombre}</h2>
         </div>
-        {producto.stage && (
-          <span className="hidden sm:inline-flex items-center gap-1 px-2.5 py-1 text-[10px] font-bold rounded-full bg-brand-50 dark:bg-brand-900/30 text-brand-700 dark:text-brand-300 border border-brand-200 dark:border-brand-800 shrink-0"
-            title="Etapa del prospecto (awareness)">
-            {STAGE_LABEL[producto.stage] || producto.stage}
-          </span>
+        {!modoAlta && (
+          <button onClick={() => {
+            try { localStorage.setItem('adslab-setup-producto', String(producto.id)); } catch {}
+            onGoToSection?.('mk-nueva-carga');
+          }}
+            className="shrink-0 inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-gray-200 border border-[rgba(130,180,255,0.22)] rounded-[10px] hover:bg-brand-500/10 transition"
+            title="El setup de este producto (foto, formato, seguimiento en Meta, competencia)">
+            <Settings size={14} /> Editar setup
+          </button>
         )}
       </div>
 
@@ -3960,9 +4051,9 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
           (ProductNavInSidebar) fue removido por pedido del user, así que estas
           son la única forma de cambiar de tab — antes quedaban ocultas con el
           sidebar abierto y no aparecían en ningún lado. */}
-      <ProductTabs activeTab={productoTab} onChange={setProductoTab} />
+      {!modoAlta && <ProductTabs activeTab={productoTab} onChange={setProductoTab} />}
 
-      {productoTab === 'bandeja' && (
+      {!modoAlta && productoTab === 'bandeja' && (
         <div className="space-y-4">
           <GeneradorRapido
             producto={producto}
@@ -3975,7 +4066,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
         </div>
       )}
 
-      {productoTab === 'documentos' && (
+      {!modoAlta && productoTab === 'documentos' && (
         <DocumentacionTab
           producto={producto}
           addToast={addToast}
@@ -3987,23 +4078,23 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
         />
       )}
 
-      {productoTab === 'campanas' && (
+      {!modoAlta && productoTab === 'campanas' && (
         <div className="-mx-4">
           <CampanasTracker addToast={addToast} />
         </div>
       )}
 
-      {productoTab === 'inspiracion' && (
+      {!modoAlta && productoTab === 'inspiracion' && (
         <div className="-mx-4">
           <InspiracionSection addToast={addToast} forcedProductoId={String(producto.id)} embedded />
         </div>
       )}
 
-      {productoTab === 'guiones' && (
+      {!modoAlta && productoTab === 'guiones' && (
         <TranscripcionVideosSection addToast={addToast} forcedProductoId={String(producto.id)} embedded />
       )}
 
-      {productoTab === 'galeria' && (
+      {!modoAlta && productoTab === 'galeria' && (
         <GaleriaReferencialesModal
           productoId={producto.id}
           productoNombre={producto.nombre}
@@ -4012,7 +4103,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
         />
       )}
 
-      {productoTab === 'creativos' && (
+      {!modoAlta && productoTab === 'creativos' && (
         <CreativosTab
           producto={producto}
           addToast={addToast}
@@ -4024,11 +4115,11 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
         />
       )}
 
-      {productoTab === 'copiloto' && (
+      {!modoAlta && productoTab === 'copiloto' && (
         <CopilotoTab producto={producto} addToast={addToast} />
       )}
 
-      {productoTab === 'setup' && <>
+      {modoAlta && <>
 
       {/* Nudge de auto-run: si pasaron > 24h y el user no está corriendo ahora */}
       {ofrecerRun && (
@@ -4065,26 +4156,6 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
             <ProductoNombreEditable producto={producto} onRename={handleRenameProducto} />
             <ProductoLandingEditable producto={producto} onSave={handleEditLandingUrl} />
             {producto.descripcion && <p className="text-gray-600 dark:text-gray-400">{producto.descripcion}</p>}
-            {/* Stage — solo visible si ya se infirió en el pipeline.
-                Editable por si el user quiere override el juicio de la IA. */}
-            {producto.stage && (
-              <div className="flex items-center gap-2 mt-1">
-                <label className="text-[10px] font-bold text-gray-500 uppercase">Stage inferido:</label>
-                <select value={producto.stage}
-                  onChange={e => setProductos(prev => prev.map(p => String(p.id) === String(producto.id) ? { ...p, stage: e.target.value } : p))}
-                  className="px-2 py-0.5 text-[11px] bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-1 focus:ring-brand-500"
-                  title={producto.stageReason || ''}>
-                  <option value="problem_aware">Problem-Aware</option>
-                  <option value="solution_aware">Solution-Aware</option>
-                  <option value="product_aware">Product-Aware</option>
-                </select>
-                {producto.stageReason && (
-                  <span className="text-[10px] text-gray-500 dark:text-gray-400 truncate flex-1" title={producto.stageReason}>
-                    · {producto.stageReason.slice(0, 80)}{producto.stageReason.length > 80 ? '…' : ''}
-                  </span>
-                )}
-              </div>
-            )}
             {/* Estado del research doc — ahora lo genera el pipeline automático
                 como primer paso, no hay que ir a Documentación aparte. */}
             {(() => {
@@ -4106,43 +4177,6 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
             {/* Foto del producto para usar como referencia en gpt-image-2
                 cuando se generan creativos referenciales desde Inspiración. */}
             <ProductoImagenUploader productoId={producto.id} producto={producto} addToast={addToast} />
-
-            {/* Activo visual de marca — elemento icónico reutilizable que se
-                propaga a todos los prompts de imagen. */}
-            <details className="mt-3 group">
-              <summary className="cursor-pointer inline-flex items-center gap-1 text-[10px] font-semibold text-gray-600 dark:text-gray-300 hover:text-brand-600 dark:hover:text-brand-400">
-                <ChevronDown size={10} className="group-open:rotate-180 transition-transform" />
-                🎨 Activo visual de marca (opcional)
-                {producto.activoVisual?.descripcion && <span className="text-emerald-600 dark:text-emerald-400">✓ definido</span>}
-              </summary>
-              <div className="mt-2 space-y-2 pl-4">
-                <p className="text-[10px] text-gray-500 dark:text-gray-400">
-                  Elemento icónico reutilizable de tu marca (frasco distintivo, textura, forma, empaque). Claude lo va a incluir en 40-60% de los prompts de imagen como hilo conductor visual.
-                </p>
-                <textarea
-                  value={producto.activoVisual?.descripcion || ''}
-                  onChange={e => setProductos(prev => prev.map(p =>
-                    String(p.id) === String(activeProductoId)
-                      ? { ...p, activoVisual: { ...(p.activoVisual || {}), descripcion: e.target.value } }
-                      : p
-                  ))}
-                  placeholder="Ej: Frasco de vidrio ámbar con tapa dorada, textura tallada en el cuerpo, etiqueta minimalista granate con tipografía serif."
-                  rows={3}
-                  className="w-full px-2.5 py-1.5 text-xs bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-brand-500 resize-y"
-                />
-                <input
-                  type="url"
-                  value={producto.activoVisual?.imageUrl || ''}
-                  onChange={e => setProductos(prev => prev.map(p =>
-                    String(p.id) === String(activeProductoId)
-                      ? { ...p, activoVisual: { ...(p.activoVisual || {}), imageUrl: e.target.value } }
-                      : p
-                  ))}
-                  placeholder="URL de una imagen de referencia (opcional)"
-                  className="w-full px-2.5 py-1.5 text-xs bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-brand-500"
-                />
-              </div>
-            </details>
 
             {/* Formato físico del producto — gomitas / cápsulas / etc.
                 CRÍTICO porque el generador de imágenes copia el formato del ad
@@ -4168,29 +4202,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
                   ))}
                   className="w-full px-2.5 py-1.5 text-xs bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-brand-500"
                 >
-                  <option value="">— No seleccionado (heurística) —</option>
-                  <option value="gomitas">🟢 Gomitas / gummies</option>
-                  <option value="cápsulas">💊 Cápsulas / softgels / pastillas</option>
-                  <option value="comprimidos">⚪ Comprimidos / tabletas</option>
-                  <option value="polvo">🥄 Polvo (mix)</option>
-                  <option value="gotas">💧 Gotas / liquid drops</option>
-                  <option value="shot">🥤 Shot líquido</option>
-                  <option value="sachet">📦 Sachet / stick individual</option>
-                  <option value="sérum">🧴 Sérum</option>
-                  <option value="crema">🪞 Crema / loción / emulsión</option>
-                  <option value="aceite">🛢️ Aceite</option>
-                  <option value="bálsamo">💄 Bálsamo</option>
-                  <option value="spray">🌬️ Spray</option>
-                  <option value="stick">📍 Stick / barra</option>
-                  <option value="mascarilla">🎭 Mascarilla / máscara</option>
-                  <option value="parches">🩹 Parches</option>
-                  <option value="cepillo">🪮 Cepillo / masajeador / gua sha</option>
-                  <option value="gadget">🔌 Gadget / dispositivo</option>
-                  <option value="herramienta">🛠️ Herramienta / accesorio</option>
-                  <option value="textil">🧣 Textil / prenda</option>
-                  <option value="hogar">🏠 Hogar / organizador</option>
-                  <option value="jardin">🌿 Jardín / exterior (luces, deco)</option>
-                  <option value="otros">❓ Otros (deja heurística)</option>
+                  {FORMATOS_PRODUCTO.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
                 </select>
 
                 {/* Tamaño real — se inyecta como directiva de ESCALA en todos
@@ -4276,7 +4288,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
               No te pedimos stage (problem/solution/product-aware) porque lo inferimos solos del research doc cuando corras el pipeline.
             </p>
             <div className="flex gap-2 justify-end">
-              <button onClick={() => { setShowProdForm(false); setProdDraft({ nombre: '', landingUrl: '', descripcion: '' }); }}
+              <button onClick={() => { setShowProdForm(false); setProdDraft({ nombre: '', landingUrl: '', descripcion: '', formato: '', medidas: '', claves: '' }); }}
                 className="px-3 py-1.5 text-xs font-semibold text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md hover:bg-gray-50 transition">
                 Cancelar
               </button>
@@ -4292,10 +4304,64 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
       {/* Paso 2 — Cuenta publicitaria Meta (opcional) */}
       <WizardCard
         num="2"
-        title="Tu cuenta publicitaria (opcional)"
-        done={!!metaAccount}
+        title="Seguimiento en Meta Ads"
+        done={!!metaAccount || (producto.palabrasClave || []).length > 0}
         badge={metaAccount ? `${metaAccount.ads?.length || 0} ads activos` : null}
       >
+        {/* Con qué cuentas y con qué palabra se reconocen las campañas de este
+            producto: "aceite" → toda campaña que lo diga se trackea acá
+            (Métricas e Inicio usan estas palabras como alias). */}
+        <div className="mb-4 space-y-3 pb-4 border-b border-gray-100 dark:border-gray-700/60">
+          <div>
+            <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400 block mb-1">Palabras clave de las campañas</span>
+            <input type="text"
+              defaultValue={(producto.palabrasClave || []).join(', ')}
+              key={`claves-${producto.id}`}
+              onBlur={e => {
+                const claves = e.target.value.split(',').map(x => x.trim()).filter(Boolean);
+                setProductos(prev => prev.map(p => String(p.id) === String(producto.id) ? { ...p, palabrasClave: claves, updated_at: new Date().toISOString() } : p));
+              }}
+              placeholder="ej: aceite, oil"
+              className="w-full px-2.5 py-1.5 text-sm bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-brand-500" />
+            <p className="text-[11px] text-gray-400 mt-1">Toda campaña de Meta cuyo nombre tenga alguna de estas palabras se cuenta para este producto. Separalas con comas.</p>
+          </div>
+          {metaConnected && (
+            <div>
+              <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400 block mb-1">Cuentas publicitarias del producto</span>
+              {availableAccounts.length === 0 ? (
+                <button onClick={loadAdAccounts} disabled={loadingAccounts}
+                  className="px-3 py-1.5 text-xs font-bold text-white bg-[#1877F2] rounded-md hover:bg-[#0f6ae0] transition disabled:opacity-50">
+                  {loadingAccounts ? 'Cargando…' : 'Ver mis cuentas'}
+                </button>
+              ) : (
+                <div className="flex flex-wrap gap-2">
+                  {availableAccounts.map(a => {
+                    const extra = producto.metaAccounts || [];
+                    const principal = metaAccount?.id === a.id;
+                    const marcada = principal || extra.some(x => x.id === a.id);
+                    return (
+                      <button key={a.id} disabled={principal}
+                        title={principal ? 'Cuenta principal del producto' : undefined}
+                        onClick={() => setProductos(prev => prev.map(p => {
+                          if (String(p.id) !== String(producto.id)) return p;
+                          const lista = (p.metaAccounts || []).filter(x => x.id !== a.id);
+                          if (!marcada) lista.push({ id: a.id, name: a.name, currency: a.currency, connId: a.connId || null });
+                          return { ...p, metaAccounts: lista, updated_at: new Date().toISOString() };
+                        }))}
+                        className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-full border transition ${marcada
+                          ? 'border-brand-500 bg-brand-500/10 text-brand-600 dark:text-brand-300'
+                          : 'border-gray-300 dark:border-gray-600 text-gray-500 dark:text-gray-400 hover:border-brand-400'}`}>
+                        {marcada ? <Check size={12} /> : <Plus size={12} />}
+                        {a.name || a.id}{principal ? ' · principal' : ''}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+              <p className="text-[11px] text-gray-400 mt-1">Marcá todas las cuentas donde corren anuncios de este producto. La principal es la que elegís abajo.</p>
+            </div>
+          )}
+        </div>
         {!metaConnected ? (
           <div className="space-y-2">
             <p className="text-xs text-gray-500 dark:text-gray-400">
@@ -4840,13 +4906,9 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
               )}
               {!running && steps.length > 0 && (
                 <>
-                  <button onClick={() => setProductoTab('bandeja')}
+                  <button onClick={() => irATab('bandeja')}
                     className="inline-flex items-center gap-1 px-3 py-2 text-xs font-bold text-brand-700 dark:text-brand-300 hover:bg-brand-50 dark:hover:bg-brand-900/20 rounded transition">
                       Ver Bandeja de ideas <ChevronRight size={12} />
-                  </button>
-                  <button onClick={() => setProductoTab('setup')}
-                    className="inline-flex items-center gap-1 px-3 py-2 text-xs font-semibold text-brand-700 dark:text-brand-300 hover:bg-brand-50 dark:hover:bg-brand-900/20 rounded transition">
-                      Ver Competencia <ChevronRight size={12} />
                   </button>
                 </>
               )}
@@ -4884,16 +4946,10 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
                   </p>
                 </div>
                 <button
-                  onClick={() => setProductoTab('bandeja')}
+                  onClick={() => irATab('bandeja')}
                   className="shrink-0 inline-flex items-center gap-1.5 px-4 py-2.5 text-sm font-bold text-white bg-gradient-to-br from-brand-500 to-brand-600 rounded-lg hover:from-brand-600 hover:to-brand-700 shadow-sm transition"
                 >
                   <Inbox size={14} /> Ver ideas en la Bandeja <ChevronRight size={14} />
-                </button>
-                <button
-                  onClick={() => setProductoTab('setup')}
-                  className="shrink-0 inline-flex items-center gap-1 px-3 py-2.5 text-xs font-semibold text-brand-700 dark:text-brand-300 bg-white dark:bg-gray-800 border border-brand-200 dark:border-brand-800 rounded-lg hover:bg-brand-50 dark:hover:bg-brand-900/20 transition"
-                >
-                  Ver Competencia <ChevronRight size={12} />
                 </button>
               </div>
             </div>

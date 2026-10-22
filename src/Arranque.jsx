@@ -988,7 +988,7 @@ function StepRow({ step, liveIdeas, onRerun, rerunBusy = false }) {
 }
 
 
-export default function ArranqueSection({ addToast, onGoToSection }) {
+export default function ArranqueSection({ addToast, onGoToSection, modoAlta = false }) {
   // Mientras se traen los productos de la nube (login en una PC nueva o con
   // la caché vacía) NO mostramos el onboarding de "primer producto": confundía,
   // parecía que se habían borrado todos. Mostramos un "trayendo…" en su lugar.
@@ -1421,6 +1421,14 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
   const [wizCx, setWizCx] = useState({ accountId: '', accountName: '', currency: '', connId: null, campanaBaseId: '', campanaBaseName: '', breakEven: '1.60', comp1: '', comp2: '' });
   const [wizCampanas, setWizCampanas] = useState([]);
   const [wizCampLoading, setWizCampLoading] = useState(false);
+  // Estáticos → Nueva carga: entra directo al alta del producto (el setup de
+  // siempre como primer paso). Al crear o cancelar, vuelve a Productos.
+  useEffect(() => {
+    if (!modoAlta) return;
+    setActiveProductoId(null);
+    setShowProdForm(true);
+    setWizPaso(1);
+  }, [modoAlta]);
   const resetWizard = () => { setWizPaso(1); setWizCx({ accountId: '', accountName: '', currency: '', connId: null, campanaBaseId: '', campanaBaseName: '', breakEven: '1.60', comp1: '', comp2: '' }); setWizCampanas([]); };
   const cargarCampanasWizard = async (accId, connId) => {
     setWizCampanas([]);
@@ -1830,6 +1838,8 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
     resetWizard();
     setShowProdForm(false);
     setActiveProductoId(String(nuevoId));
+    // Desde "Nueva carga": el producto recién creado se abre en Productos.
+    if (modoAlta) onGoToSection?.('mk-arranque');
     addToast?.({
       type: 'success',
       message: wizCx.accountId
@@ -3334,7 +3344,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
             )}
 
             <div className="flex gap-2 justify-end">
-              <button onClick={() => { setShowProdForm(false); setProdDraft({ nombre: '', landingUrl: '', descripcion: '' }); resetWizard(); }}
+              <button onClick={() => { setShowProdForm(false); setProdDraft({ nombre: '', landingUrl: '', descripcion: '' }); resetWizard(); if (modoAlta) onGoToSection?.('mk-arranque'); }}
                 className="px-3 py-1.5 text-xs font-semibold text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md hover:bg-gray-50 transition">
                 Cancelar
               </button>

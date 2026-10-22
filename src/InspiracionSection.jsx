@@ -1679,6 +1679,7 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
   // localStorage pero rompía quota con muchos ads. Ahora se hidratan desde
   // IDB (competidorAdsIDB) cuando el producto se monta o cambia.
   const [compAdsByCompId, setCompAdsByCompId] = useState({});
+  useEffect(() => { if (biblioteca && soloProbados) setSoloProbados(false); }, [biblioteca]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // BIBLIOTECA GENERAL (Estáticos → Inspiración): además de las marcas del
   // producto elegido, se muestran las de TODOS los otros productos. No se
@@ -4134,7 +4135,7 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
                 : 'border-[rgba(130,180,255,0.22)] text-gray-300 hover:bg-brand-500/10'}`;
               return (
                 <div className="flex flex-wrap items-center gap-2">
-                  <button className={chip(origenFiltro === 'todas')} onClick={() => setOrigenFiltro('todas')}>Todas las marcas</button>
+                  <button className={chip(origenFiltro === 'todas')} onClick={() => setOrigenFiltro('todas')} title="Muestra las marcas de todos tus productos">Todas las marcas</button>
                   {cargandoBiblio && <span className="inline-flex items-center gap-1.5 text-[12px] text-gray-400"><Loader2 size={12} className="animate-spin" /> Trayendo todas las marcas…</span>}
                   {origenes.map(o => (
                     <button key={o} className={chip(origenFiltro === o)} onClick={() => setOrigenFiltro(origenFiltro === o ? 'todas' : o)}
@@ -4180,6 +4181,7 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
                   </p>
                 )}
               </div>
+              {!biblioteca && (<>
               <select value={tipoFiltro} onChange={e => setTipoFiltro(e.target.value)}
                 className="px-2 py-1.5 text-xs bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded">
                 <option value="all">Marcas: todas</option>
@@ -4198,6 +4200,7 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
                 <option value="ads-count">Orden: más anuncios</option>
                 <option value="nombre">Orden: nombre (A-Z)</option>
               </select>
+              </>)}
               <span className="text-[11px] tabular-nums text-gray-500 dark:text-gray-400 px-1">
                 {unif.length} marca{unif.length === 1 ? '' : 's'}
               </span>
@@ -4391,7 +4394,7 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
                     {/* Toggle: solo ads "probados" (≥5 días corriendo). Los
                         ads con <5 días suelen ser tests sin validar. Filtra el
                         display; el scrape igual trae todos los activos. */}
-                    <button
+                    {!biblioteca && <button
                       onClick={() => setSoloProbados(v => !v)}
                       className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-semibold rounded border transition ${
                         soloProbados
@@ -4401,7 +4404,7 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
                       title="Solo muestra ads ACTIVOS con al menos 5 días corriendo (los que el advertiser ya validó). Apagá para ver también los tests recién lanzados."
                     >
                       {soloProbados ? '✓ ' : ''}Solo probados (5+ días)
-                    </button>
+                    </button>}
                     <button
                       disabled={scrapingBrandIds.size > 0 || smartEligibles.length === 0}
                       onClick={onSmart}

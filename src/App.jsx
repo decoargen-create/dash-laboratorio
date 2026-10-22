@@ -14,6 +14,7 @@ import KombialoSeccion, { SECCIONES_KOMBIALO } from './KombialoSeccion.jsx';
 import InicioKombi from './InicioKombi.jsx';
 import EquipoCreativo from './EquipoCreativo.jsx';
 import InspiracionGeneral from './InspiracionGeneral.jsx';
+import GaleriaGeneral from './GaleriaGeneral.jsx';
 import CalculadoraPrecios from './CalculadoraPrecios.jsx';
 import MarketingSection from './Marketing.jsx';
 // CompetenciaSection (./Competencia.jsx) fue deprecada — la fuente de verdad
@@ -1498,7 +1499,7 @@ function AppShell({ onExit }) {
       // Si tenía una sección de Viora/Senydrop/MetaAds, defaulteamos a la
       // de Marketing. Lista de secciones válidas en las plataformas activas:
       const validSections = ['mk-home', 'mk-arranque', 'mk-bandeja', 'mk-copy', 'mk-metricas', 'mk-testeos',
-        'mk-inspiracion', 'mk-winners', 'mk-produccion', 'mk-publicar', 'mk-landings', 'mk-gastos', 'mk-docs', 'mk-plan', 'con-acta', 'mk-nueva-carga', 'mk-escalar', 'mk-creativa', 'mk-calculadora'];
+        'mk-inspiracion', 'mk-winners', 'mk-produccion', 'mk-publicar', 'mk-landings', 'mk-gastos', 'mk-docs', 'mk-plan', 'con-acta', 'mk-nueva-carga', 'mk-escalar', 'mk-creativa', 'mk-calculadora', 'mk-galeria'];
       return validSections.includes(saved) || SECCIONES_KOMBIALO[saved] ? saved : 'mk-home';
     } catch { return 'mk-home'; }
   });
@@ -2308,7 +2309,7 @@ function AppShell({ onExit }) {
     if (currentPlatform !== 'marketing') { setCurrentPlatform('marketing'); return; }
     const SECCIONES_AREA = {
       metricas: ['mk-home', 'mk-metricas', 'mk-escalar'],
-      productos: ['mk-home', 'mk-arranque', 'mk-nueva-carga', 'mk-inspiracion'],
+      productos: ['mk-home', 'mk-arranque', 'mk-nueva-carga', 'mk-inspiracion', 'mk-galeria'],
       produccion: ['mk-home', 'mk-produccion', 'mk-publicar', 'mk-creativa'],
       landings: ['mk-home', 'mk-landings'],
     };
@@ -2547,6 +2548,7 @@ function AppShell({ onExit }) {
                   <NavItem sub icon={Plus} label="Nueva carga" section="mk-nueva-carga" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
                   <NavItem sub icon={Play} label="Productos" section="mk-arranque" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
                   <NavItem sub icon={Sparkles} label="Inspiración" section="mk-inspiracion" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
+                  <NavItem sub icon={ImageIconKb} label="Galería" section="mk-galeria" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
                 </NavSection>
               )}
               {(!currentUser.miembro || currentUser.miembro.areas.some(a => a === 'produccion' || a === 'landings')) && (
@@ -2676,6 +2678,7 @@ function AppShell({ onExit }) {
           {/* mk-competencia (sidebar legacy) está redirigido por el effect
               de arriba a mk-arranque — no necesita su propio render. */}
           {currentUser.role === 'admin' && currentPlatform === 'marketing' && (supabaseUser || !supabase) && currentSection === 'mk-inspiracion' && <InspiracionGeneral addToast={addToast} />}
+          {currentUser.role === 'admin' && currentPlatform === 'marketing' && (supabaseUser || !supabase) && currentSection === 'mk-galeria' && <GaleriaGeneral />}
           {currentUser.role === 'admin' && currentPlatform === 'marketing' && (supabaseUser || !supabase) && currentSection === 'mk-metricas' && <MetricasSection addToast={addToast} />}
           {currentUser.role === 'admin' && currentPlatform === 'marketing' && (supabaseUser || !supabase) && currentSection === 'mk-publicar' && <PublicarSection addToast={addToast} />}
           {currentUser.role === 'admin' && currentPlatform === 'marketing' && (supabaseUser || !supabase) && currentSection === 'mk-testeos' && <TesteosSection addToast={addToast} />}
@@ -8593,6 +8596,7 @@ function getSectionTitle(user, section) {
     'mk-metricas': 'Métricas',
     'mk-testeos': 'Marketing · Testeos',
     'mk-inspiracion': 'Inspiración',
+    'mk-galeria': 'Galería',
     'mk-winners': 'Marketing · Winners',
     'mk-produccion': 'Equipo creativo',
     'mk-landings': 'Landings',

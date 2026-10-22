@@ -626,7 +626,7 @@ const FLOW_STEPS = [
   { emoji: '▶️', tab: null, titulo: 'Analizar y generar ideas', desc: 'Miramos los anuncios ganadores de tu competencia y te armamos ideas.' },
   { emoji: '📥', tab: 'bandeja', titulo: 'Bandeja', desc: 'Revisás cada idea y generás el creativo ahí mismo.' },
   { emoji: '✨', tab: null, titulo: 'Inspiración', desc: 'En Estáticos → Inspiración: elegís anuncios de referencia de cualquier marca y generás para el producto que quieras.' },
-  { emoji: '🖼️', tab: 'galeria', titulo: 'Galería', desc: 'Ves los estáticos generados, listos para descargar.' },
+  { emoji: '🖼️', tab: null, titulo: 'Galería', desc: 'En Estáticos → Galería: los estáticos generados de cada producto, listos para descargar.' },
 ];
 
 function FlowGuide() {
@@ -712,7 +712,6 @@ function ProductTabs({ activeTab, onChange }) {
         // { id: 'creativos', label: 'Creativos', emoji: '🎨' },
         // Guiones IA: oculta por ahora (pedido del user 22/10), igual que Creativos.
         // { id: 'guiones', label: 'Guiones IA', emoji: '🎬' },
-        { id: 'galeria', label: 'Galería', emoji: '🖼️' },
       ],
     },
   ];
@@ -1155,7 +1154,7 @@ export default function ArranqueSection({ addToast, onGoToSection, modoAlta = fa
     // Métricas (pedido del user 22/10: estaba de más en el producto).
     // El Setup salió de las pestañas: vive en Estáticos → Nueva carga.
     // Inspiración también salió: es la biblioteca general (Estáticos → Inspiración).
-    const REMOVED = ['dashboard', 'competencia', 'campanas', 'creativos', 'guiones', 'setup', 'inspiracion'];
+    const REMOVED = ['dashboard', 'competencia', 'campanas', 'creativos', 'guiones', 'setup', 'inspiracion', 'galeria'];
     try {
       const saved = localStorage.getItem(productoTabKey) || 'bandeja';
       setProductoTab(REMOVED.includes(saved) ? 'bandeja' : saved);
@@ -1193,8 +1192,18 @@ export default function ArranqueSection({ addToast, onGoToSection, modoAlta = fa
     };
     const onTab = (e) => {
       const tab = e?.detail?.tab;
-      // Tabs retiradas caen a 'setup' (competencia ahora vive ahí).
-      if (tab) setProductoTab(['dashboard', 'competencia', 'setup', 'inspiracion'].includes(tab) ? 'bandeja' : tab);
+      // La Galería y la Inspiración ahora son secciones del menú: se abre la
+      // sección (la Galería, con el producto activo ya elegido).
+      if (tab === 'galeria' || tab === 'inspiracion') {
+        try {
+          const pid = localStorage.getItem('adslab-marketing-active-product');
+          if (pid && tab === 'galeria') localStorage.setItem('adslab-galeria-producto', pid);
+        } catch {}
+        onGoToSection?.(tab === 'galeria' ? 'mk-galeria' : 'mk-inspiracion');
+        return;
+      }
+      // Tabs retiradas caen a la Bandeja.
+      if (tab) setProductoTab(['dashboard', 'competencia', 'setup'].includes(tab) ? 'bandeja' : tab);
     };
     window.addEventListener('viora:product-select', onSelect);
     window.addEventListener('viora:product-tab', onTab);

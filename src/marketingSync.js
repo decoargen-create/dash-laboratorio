@@ -277,16 +277,20 @@ export async function pullMarketingFromCloud() {
   // deshacía (el producto reaparecía y se re-pusheaba al cloud).
   // En el PRIMER pull (sin marca previa) preservamos todo: merge inicial a la
   // unión, sin riesgo de deshacer un delete que todavía no existió.
-  const LAST_PULL_KEY = 'adslab-marketing-last-pull-ts';
-  let lastPullTs = 0;
-  try { lastPullTs = Number(localStorage.getItem(LAST_PULL_KEY)) || 0; } catch {}
+  // ⚠️ Gate por TIMESTAMP eliminado (22/10): comparaba la fecha del producto
+  // contra la del último pull para no resucitar borrados — pero los borrados
+  // reales YA quedan como lápida (_deleted) en el cloud y entran a cloudIds,
+  // así que el gate solo le pegaba al caso contrario: un producto NUEVO cuyo
+  // push falló (p.ej. sesión de Supabase vencida → push dropeado) era
+  // DEVORADO por el siguiente pull — creabas el producto, veías el toast de
+  // éxito y a los segundos desaparecía de la lista para siempre (bug
+  // reportado 22/10 con "Base en barra"). Ahora: todo producto local que no
+  // tenga fila en el cloud (ni viva ni lápida) se preserva y el push
+  // automático de abajo lo sube.
   const cloudIds = new Set((productos || []).map(r => String(r.id)));
   for (const lp of localArr) {
     if (!lp || lp.id == null || cloudIds.has(String(lp.id))) continue;
-    const lpTs = Date.parse(lp.updated_at || lp.updatedAt || lp.createdAt || lp.created_at || 0) || 0;
-    if (lastPullTs === 0 || lpTs > lastPullTs) {
-      productosArr.push(lp);
-    }
+    productosArr.push(lp);
   }
 
   // Detectar si hicimos merge — disparar push automático para subir lo

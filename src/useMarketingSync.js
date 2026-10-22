@@ -350,6 +350,10 @@ export function useMarketingSync({ addToast } = {}) {
           // null explícito (session expired) → drop. timeout placeholder → seguir.
           if (session === null) {
             console.warn(`[sync] push de ${key} dropeado — no hay sesión activa`);
+            // AVISAR, no tragar: un drop silencioso acá significaba que el
+            // user creaba un producto, veía "creado ✓" y el cambio jamás
+            // llegaba a la nube (bug "Base en barra", 22/10).
+            addToast?.({ type: 'error', message: 'Tu sesión venció: los cambios NO se están guardando en la nube. Cerrá sesión y volvé a entrar.' });
             return;
           }
         }

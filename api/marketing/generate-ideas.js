@@ -404,7 +404,9 @@ function buildContext({ producto, competidoresAnalisis, allCompAds, ideasExisten
   // Activo visual de marca — elemento icónico reutilizable (frasco, textura,
   // forma distintiva). Si está definido, Claude debe incluirlo en el
   // promptGeneradorImagen de ~40-60% de las piezas como hilo conductor.
-  if (producto?.activoVisual?.descripcion) {
+  // Desactivado 22/10: el activo visual salió del Setup (no se usaba) y un
+  // valor viejo guardado no tiene que seguir metiéndose en los creativos.
+  if (false && producto?.activoVisual?.descripcion) {
     parts.push(`\n**ACTIVO VISUAL DE MARCA** (hilo conductor icónico del producto — incluir en 40-60% de las piezas):`);
     parts.push(producto.activoVisual.descripcion);
     if (producto.activoVisual.imageUrl) {

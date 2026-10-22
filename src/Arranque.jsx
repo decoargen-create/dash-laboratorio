@@ -175,6 +175,33 @@ function ProductAvatar({ id, nombre, producto = null, sizeClass = 'w-12 h-12', r
   );
 }
 
+// Formato físico del producto (lo usan el alta y el Setup).
+const FORMATOS_PRODUCTO = [
+  ['', '— No seleccionado (heurística) —'],
+  ['gomitas', '🟢 Gomitas / gummies'],
+  ['cápsulas', '💊 Cápsulas / softgels / pastillas'],
+  ['comprimidos', '⚪ Comprimidos / tabletas'],
+  ['polvo', '🥄 Polvo (mix)'],
+  ['gotas', '💧 Gotas / liquid drops'],
+  ['shot', '🥤 Shot líquido'],
+  ['sachet', '📦 Sachet / stick individual'],
+  ['sérum', '🧴 Sérum'],
+  ['crema', '🪞 Crema / loción / emulsión'],
+  ['aceite', '🛢️ Aceite'],
+  ['bálsamo', '💄 Bálsamo'],
+  ['spray', '🌬️ Spray'],
+  ['stick', '📍 Stick / barra'],
+  ['mascarilla', '🎭 Mascarilla / máscara'],
+  ['parches', '🩹 Parches'],
+  ['cepillo', '🪮 Cepillo / masajeador / gua sha'],
+  ['gadget', '🔌 Gadget / dispositivo'],
+  ['herramienta', '🛠️ Herramienta / accesorio'],
+  ['textil', '🧣 Textil / prenda'],
+  ['hogar', '🏠 Hogar / organizador'],
+  ['jardin', '🌿 Jardín / exterior (luces, deco)'],
+  ['otros', '❓ Otros (deja heurística)'],
+];
+
 // Etiquetas cortas de la etapa de awareness del prospecto — para el chip
 // del header del workspace.
 const STAGE_LABEL = {
@@ -1416,7 +1443,7 @@ export default function ArranqueSection({ addToast, onGoToSection, modoAlta = fa
   useEffect(() => {
     try { localStorage.setItem('adslab-productos-vista', vista); } catch {}
   }, [vista]);
-  const [prodDraft, setProdDraft] = useState({ nombre: '', landingUrl: '', descripcion: '' });
+  const [prodDraft, setProdDraft] = useState({ nombre: '', landingUrl: '', descripcion: '', formato: '', medidas: '' });
   // Wizard de ALTA de producto (Kombialo OS, etapa 1): el producto nace
   // enchufado — cuenta publicitaria, campaña base de referencia, break-even
   // y primeros competidores, todo en el alta en vez de configurarse después.
@@ -1824,6 +1851,8 @@ export default function ArranqueSection({ addToast, onGoToSection, modoAlta = fa
       nombre,
       landingUrl,
       descripcion: prodDraft.descripcion.trim(),
+      ...(prodDraft.formato ? { formato: prodDraft.formato } : {}),
+      ...(prodDraft.medidas.trim() ? { medidas: prodDraft.medidas.trim() } : {}),
       competidores: comps,
       createdAt: new Date().toISOString(),
     };
@@ -1837,7 +1866,7 @@ export default function ArranqueSection({ addToast, onGoToSection, modoAlta = fa
     if (Number.isFinite(be) && be > 0) nuevo.breakEven = be;
 
     setProductos(prev => [nuevo, ...prev]);
-    setProdDraft({ nombre: '', landingUrl: '', descripcion: '' });
+    setProdDraft({ nombre: '', landingUrl: '', descripcion: '', formato: '', medidas: '' });
     resetWizard();
     setShowProdForm(false);
     setActiveProductoId(String(nuevoId));
@@ -3248,7 +3277,7 @@ export default function ArranqueSection({ addToast, onGoToSection, modoAlta = fa
             <div className="flex items-center gap-3 flex-wrap">
               <h3 className="text-sm font-bold text-gray-900 dark:text-gray-100">Nuevo producto</h3>
               <div className="flex gap-1.5 ml-auto">
-                {[[1, 'El producto'], [2, 'Conexiones'], [3, 'Competencia']].map(([n, lbl]) => (
+                {[[1, 'El producto'], [2, 'Formato'], [3, 'Conexiones'], [4, 'Competencia']].map(([n, lbl]) => (
                   <span key={n} className={`inline-flex items-center gap-1.5 text-[10.5px] font-bold px-2.5 py-1 rounded-full border ${
                     wizPaso === n ? 'border-brand-500 bg-brand-50 dark:bg-brand-900/30 text-brand-700 dark:text-brand-300'
                       : wizPaso > n ? 'border-emerald-300 dark:border-emerald-800 text-emerald-600 dark:text-emerald-400'
@@ -3274,6 +3303,26 @@ export default function ArranqueSection({ addToast, onGoToSection, modoAlta = fa
             )}
 
             {wizPaso === 2 && (
+              <div className="space-y-3">
+                <div>
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400 block mb-1">Formato del producto</span>
+                  <select value={prodDraft.formato} onChange={e => setProdDraft({ ...prodDraft, formato: e.target.value })}
+                    className="w-full px-2.5 py-1.5 text-sm bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-brand-500">
+                    {FORMATOS_PRODUCTO.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+                  </select>
+                  <p className="text-[11px] text-gray-400 mt-1">Así el generador dibuja tu producto como es (no las cápsulas del anuncio de referencia).</p>
+                </div>
+                <div>
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400 block mb-1">Tamaño real / medidas · opcional</span>
+                  <input type="text" value={prodDraft.medidas} onChange={e => setProdDraft({ ...prodDraft, medidas: e.target.value })}
+                    placeholder="ej: 13 cm de largo, entra en la palma de la mano"
+                    className="w-full px-2.5 py-1.5 text-sm bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-brand-500" />
+                  <p className="text-[11px] text-gray-400 mt-1">Cuánto mide y con qué se compara: así sale del tamaño correcto en todos los creativos.</p>
+                </div>
+              </div>
+            )}
+
+            {wizPaso === 3 && (
               <div className="space-y-3">
                 <div>
                   <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400 block mb-1">Cuenta publicitaria · opcional</span>
@@ -3323,7 +3372,7 @@ export default function ArranqueSection({ addToast, onGoToSection, modoAlta = fa
               </div>
             )}
 
-            {wizPaso === 3 && (
+            {wizPaso === 4 && (
               <div className="space-y-3">
                 <div>
                   <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400 block mb-1">Competidores a monitorear · opcional</span>
@@ -3347,7 +3396,7 @@ export default function ArranqueSection({ addToast, onGoToSection, modoAlta = fa
             )}
 
             <div className="flex gap-2 justify-end">
-              <button onClick={() => { setShowProdForm(false); setProdDraft({ nombre: '', landingUrl: '', descripcion: '' }); resetWizard(); if (modoAlta) onGoToSection?.('mk-arranque'); }}
+              <button onClick={() => { setShowProdForm(false); setProdDraft({ nombre: '', landingUrl: '', descripcion: '', formato: '', medidas: '' }); resetWizard(); if (modoAlta) onGoToSection?.('mk-arranque'); }}
                 className="px-3 py-1.5 text-xs font-semibold text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md hover:bg-gray-50 transition">
                 Cancelar
               </button>
@@ -3357,10 +3406,10 @@ export default function ArranqueSection({ addToast, onGoToSection, modoAlta = fa
                   ← Atrás
                 </button>
               )}
-              {wizPaso < 3 ? (
+              {wizPaso < 4 ? (
                 <button onClick={() => {
                   if (wizPaso === 1 && !prodDraft.nombre.trim()) { addToast?.({ type: 'error', message: 'Ponele nombre al producto' }); return; }
-                  if (wizPaso === 1 && metaConnected && availableAccounts.length === 0 && !loadingAccounts) loadAdAccounts();
+                  if (wizPaso === 2 && metaConnected && availableAccounts.length === 0 && !loadingAccounts) loadAdAccounts();
                   setWizPaso(p => p + 1);
                 }}
                   className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-bold text-white bg-gradient-to-br from-brand-500 to-brand-700 rounded-md hover:from-brand-600 hover:to-brand-800 transition">
@@ -3475,7 +3524,7 @@ export default function ArranqueSection({ addToast, onGoToSection, modoAlta = fa
                   {hasResearch ? '✓ Documentado' : '○ Sin research'}
                 </span>
               );
-              const stagePill = p.stage ? (
+              const stagePill = null && p.stage ? (
                 <span className="inline-flex items-center px-1.5 py-0.5 text-[9px] font-semibold rounded bg-brand-50 dark:bg-brand-900/30 text-brand-700 dark:text-brand-300">
                   {(STAGE_LABEL[p.stage] || p.stage).replace('_', '-')}
                 </span>
@@ -3666,11 +3715,6 @@ export default function ArranqueSection({ addToast, onGoToSection, modoAlta = fa
                       {/* Un solo chip de estado (research) + stage en texto sutil. */}
                       <div className="flex items-center gap-2 mt-0.5">
                         {researchPill}
-                        {stagePill && (
-                          <span className="text-[10px] text-gray-400 dark:text-gray-500 truncate">
-                            {(STAGE_LABEL[p.stage] || p.stage).replace('_', '-')}
-                          </span>
-                        )}
                       </div>
                       {/* Barra de avance de descargas — visible en toda pantalla. */}
                       {cc.total > 0 && (
@@ -3766,11 +3810,6 @@ export default function ArranqueSection({ addToast, onGoToSection, modoAlta = fa
                       <p className="text-sm font-bold text-gray-900 dark:text-gray-100 truncate">{p.nombre}</p>
                       <div className="flex items-center gap-2 mt-1">
                         {researchPill}
-                        {stagePill && (
-                          <span className="text-[10px] text-gray-400 dark:text-gray-500 truncate">
-                            {(STAGE_LABEL[p.stage] || p.stage).replace('_', '-')}
-                          </span>
-                        )}
                       </div>
                     </div>
                   </div>
@@ -3960,12 +3999,6 @@ export default function ArranqueSection({ addToast, onGoToSection, modoAlta = fa
           </p>
           <h2 className="text-xl font-bold text-gray-900 dark:text-gray-100 truncate leading-tight">{producto.nombre}</h2>
         </div>
-        {producto.stage && (
-          <span className="hidden sm:inline-flex items-center gap-1 px-2.5 py-1 text-[10px] font-bold rounded-full bg-brand-50 dark:bg-brand-900/30 text-brand-700 dark:text-brand-300 border border-brand-200 dark:border-brand-800 shrink-0"
-            title="Etapa del prospecto (awareness)">
-            {STAGE_LABEL[producto.stage] || producto.stage}
-          </span>
-        )}
       </div>
 
       {/* Tabs del workspace — Dashboard, Setup, Bandeja, Inspiración, Creativos.
@@ -4078,26 +4111,6 @@ export default function ArranqueSection({ addToast, onGoToSection, modoAlta = fa
             <ProductoNombreEditable producto={producto} onRename={handleRenameProducto} />
             <ProductoLandingEditable producto={producto} onSave={handleEditLandingUrl} />
             {producto.descripcion && <p className="text-gray-600 dark:text-gray-400">{producto.descripcion}</p>}
-            {/* Stage — solo visible si ya se infirió en el pipeline.
-                Editable por si el user quiere override el juicio de la IA. */}
-            {producto.stage && (
-              <div className="flex items-center gap-2 mt-1">
-                <label className="text-[10px] font-bold text-gray-500 uppercase">Stage inferido:</label>
-                <select value={producto.stage}
-                  onChange={e => setProductos(prev => prev.map(p => String(p.id) === String(producto.id) ? { ...p, stage: e.target.value } : p))}
-                  className="px-2 py-0.5 text-[11px] bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-1 focus:ring-brand-500"
-                  title={producto.stageReason || ''}>
-                  <option value="problem_aware">Problem-Aware</option>
-                  <option value="solution_aware">Solution-Aware</option>
-                  <option value="product_aware">Product-Aware</option>
-                </select>
-                {producto.stageReason && (
-                  <span className="text-[10px] text-gray-500 dark:text-gray-400 truncate flex-1" title={producto.stageReason}>
-                    · {producto.stageReason.slice(0, 80)}{producto.stageReason.length > 80 ? '…' : ''}
-                  </span>
-                )}
-              </div>
-            )}
             {/* Estado del research doc — ahora lo genera el pipeline automático
                 como primer paso, no hay que ir a Documentación aparte. */}
             {(() => {
@@ -4119,43 +4132,6 @@ export default function ArranqueSection({ addToast, onGoToSection, modoAlta = fa
             {/* Foto del producto para usar como referencia en gpt-image-2
                 cuando se generan creativos referenciales desde Inspiración. */}
             <ProductoImagenUploader productoId={producto.id} producto={producto} addToast={addToast} />
-
-            {/* Activo visual de marca — elemento icónico reutilizable que se
-                propaga a todos los prompts de imagen. */}
-            <details className="mt-3 group">
-              <summary className="cursor-pointer inline-flex items-center gap-1 text-[10px] font-semibold text-gray-600 dark:text-gray-300 hover:text-brand-600 dark:hover:text-brand-400">
-                <ChevronDown size={10} className="group-open:rotate-180 transition-transform" />
-                🎨 Activo visual de marca (opcional)
-                {producto.activoVisual?.descripcion && <span className="text-emerald-600 dark:text-emerald-400">✓ definido</span>}
-              </summary>
-              <div className="mt-2 space-y-2 pl-4">
-                <p className="text-[10px] text-gray-500 dark:text-gray-400">
-                  Elemento icónico reutilizable de tu marca (frasco distintivo, textura, forma, empaque). Claude lo va a incluir en 40-60% de los prompts de imagen como hilo conductor visual.
-                </p>
-                <textarea
-                  value={producto.activoVisual?.descripcion || ''}
-                  onChange={e => setProductos(prev => prev.map(p =>
-                    String(p.id) === String(activeProductoId)
-                      ? { ...p, activoVisual: { ...(p.activoVisual || {}), descripcion: e.target.value } }
-                      : p
-                  ))}
-                  placeholder="Ej: Frasco de vidrio ámbar con tapa dorada, textura tallada en el cuerpo, etiqueta minimalista granate con tipografía serif."
-                  rows={3}
-                  className="w-full px-2.5 py-1.5 text-xs bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-brand-500 resize-y"
-                />
-                <input
-                  type="url"
-                  value={producto.activoVisual?.imageUrl || ''}
-                  onChange={e => setProductos(prev => prev.map(p =>
-                    String(p.id) === String(activeProductoId)
-                      ? { ...p, activoVisual: { ...(p.activoVisual || {}), imageUrl: e.target.value } }
-                      : p
-                  ))}
-                  placeholder="URL de una imagen de referencia (opcional)"
-                  className="w-full px-2.5 py-1.5 text-xs bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-brand-500"
-                />
-              </div>
-            </details>
 
             {/* Formato físico del producto — gomitas / cápsulas / etc.
                 CRÍTICO porque el generador de imágenes copia el formato del ad
@@ -4181,29 +4157,7 @@ export default function ArranqueSection({ addToast, onGoToSection, modoAlta = fa
                   ))}
                   className="w-full px-2.5 py-1.5 text-xs bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-brand-500"
                 >
-                  <option value="">— No seleccionado (heurística) —</option>
-                  <option value="gomitas">🟢 Gomitas / gummies</option>
-                  <option value="cápsulas">💊 Cápsulas / softgels / pastillas</option>
-                  <option value="comprimidos">⚪ Comprimidos / tabletas</option>
-                  <option value="polvo">🥄 Polvo (mix)</option>
-                  <option value="gotas">💧 Gotas / liquid drops</option>
-                  <option value="shot">🥤 Shot líquido</option>
-                  <option value="sachet">📦 Sachet / stick individual</option>
-                  <option value="sérum">🧴 Sérum</option>
-                  <option value="crema">🪞 Crema / loción / emulsión</option>
-                  <option value="aceite">🛢️ Aceite</option>
-                  <option value="bálsamo">💄 Bálsamo</option>
-                  <option value="spray">🌬️ Spray</option>
-                  <option value="stick">📍 Stick / barra</option>
-                  <option value="mascarilla">🎭 Mascarilla / máscara</option>
-                  <option value="parches">🩹 Parches</option>
-                  <option value="cepillo">🪮 Cepillo / masajeador / gua sha</option>
-                  <option value="gadget">🔌 Gadget / dispositivo</option>
-                  <option value="herramienta">🛠️ Herramienta / accesorio</option>
-                  <option value="textil">🧣 Textil / prenda</option>
-                  <option value="hogar">🏠 Hogar / organizador</option>
-                  <option value="jardin">🌿 Jardín / exterior (luces, deco)</option>
-                  <option value="otros">❓ Otros (deja heurística)</option>
+                  {FORMATOS_PRODUCTO.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
                 </select>
 
                 {/* Tamaño real — se inyecta como directiva de ESCALA en todos
@@ -4289,7 +4243,7 @@ export default function ArranqueSection({ addToast, onGoToSection, modoAlta = fa
               No te pedimos stage (problem/solution/product-aware) porque lo inferimos solos del research doc cuando corras el pipeline.
             </p>
             <div className="flex gap-2 justify-end">
-              <button onClick={() => { setShowProdForm(false); setProdDraft({ nombre: '', landingUrl: '', descripcion: '' }); }}
+              <button onClick={() => { setShowProdForm(false); setProdDraft({ nombre: '', landingUrl: '', descripcion: '', formato: '', medidas: '' }); }}
                 className="px-3 py-1.5 text-xs font-semibold text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md hover:bg-gray-50 transition">
                 Cancelar
               </button>

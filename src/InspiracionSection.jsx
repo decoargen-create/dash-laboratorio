@@ -2085,7 +2085,6 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
           landingUrl: producto.landingUrl,
           research: producto.docs?.research,
           avatar: producto.docs?.avatar,
-          activoVisual: producto.activoVisual,
         },
         inspiracion: { brandNombre, ad },
       }),

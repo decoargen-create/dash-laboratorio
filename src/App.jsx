@@ -2524,7 +2524,7 @@ function AppShell({ onExit }) {
                   {(!currentUser.miembro || currentUser.miembro.areas.includes('metricas')) && (
                     <NavItem sub icon={TrendingUp} label="Escalar ADS" section="mk-escalar" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
                   )}
-                  {!currentUser.miembro && ['kb-ads-productos', 'kb-ads-copys', 'kb-ads-carga', 'kb-ads-admin', 'kb-ads-auto'].map(k => (
+                  {!currentUser.miembro && ['kb-ads-auto'].map(k => (
                     <NavItem key={k} sub icon={Megaphone} label={SECCIONES_KOMBIALO[k].titulo} section={k} currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
                   ))}
                 </NavSection>

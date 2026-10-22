@@ -1459,6 +1459,27 @@ export default function ArranqueSection({ addToast, onGoToSection, modoAlta = fa
   // enchufado — cuenta publicitaria, campaña base de referencia, break-even
   // y primeros competidores, todo en el alta en vez de configurarse después.
   const [wizPaso, setWizPaso] = useState(1);
+  // Detección del formato con IA (paso 2 del alta): { estado: 'idle'|'leyendo'|'listo'|'error', motivo }
+  const [detFormato, setDetFormato] = useState({ estado: 'idle', motivo: '' });
+  const detectarFormato = async (draft) => {
+    const d = draft || prodDraft;
+    if (!d.nombre.trim() && !d.landingUrl.trim()) return;
+    setDetFormato({ estado: 'leyendo', motivo: '' });
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const r = await fetch('/api/marketing/detectar-formato', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...(session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {}) },
+        body: JSON.stringify({ nombre: d.nombre, landingUrl: d.landingUrl }),
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.error || `Error ${r.status}`);
+      setProdDraft(prev => ({ ...prev, formato: j.formato || prev.formato, medidas: prev.medidas.trim() ? prev.medidas : (j.medidas || '') }));
+      setDetFormato({ estado: 'listo', motivo: j.formato ? (j.motivo || '') : 'No me alcanzó la página para saberlo: elegilo vos.' });
+    } catch (e) {
+      setDetFormato({ estado: 'error', motivo: e.message || 'No pude analizar el producto.' });
+    }
+  };
   const [wizCx, setWizCx] = useState({ accountId: '', accountName: '', currency: '', connId: null, campanaBaseId: '', campanaBaseName: '', breakEven: '1.60', comp1: '', comp2: '' });
   const [wizCampanas, setWizCampanas] = useState([]);
   const [wizCampLoading, setWizCampLoading] = useState(false);
@@ -1481,7 +1502,8 @@ export default function ArranqueSection({ addToast, onGoToSection, modoAlta = fa
   // Desde el setup (Nueva carga), los atajos a otras pestañas abren el
   // producto en Productos con esa pestaña.
   const irATab = (t) => { setProductoTab(t); if (modoAlta) setTimeout(() => onGoToSection?.('mk-arranque'), 0); };
-  const resetWizard = () => { setWizPaso(1); setWizCx({ accountId: '', accountName: '', currency: '', connId: null, campanaBaseId: '', campanaBaseName: '', breakEven: '1.60', comp1: '', comp2: '' }); setWizCampanas([]); };
+  const resetWizard = () => {
+    setDetFormato({ estado: 'idle', motivo: '' }); setWizPaso(1); setWizCx({ accountId: '', accountName: '', currency: '', connId: null, campanaBaseId: '', campanaBaseName: '', breakEven: '1.60', comp1: '', comp2: '' }); setWizCampanas([]); };
   const cargarCampanasWizard = async (accId, connId) => {
     setWizCampanas([]);
     if (!accId) return;
@@ -3328,7 +3350,19 @@ export default function ArranqueSection({ addToast, onGoToSection, modoAlta = fa
             {wizPaso === 2 && (
               <div className="space-y-3">
                 <div>
-                  <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400 block mb-1">Formato del producto</span>
+                  <div className="flex items-center justify-between gap-2 mb-1">
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400">Formato del producto</span>
+                    <button type="button" onClick={() => detectarFormato()} disabled={detFormato.estado === 'leyendo'}
+                      className="inline-flex items-center gap-1 text-[11px] font-semibold text-brand-400 hover:text-brand-300 disabled:opacity-60">
+                      {detFormato.estado === 'leyendo' ? <Loader2 size={11} className="animate-spin" /> : <Sparkles size={11} />}
+                      {detFormato.estado === 'leyendo' ? 'Leyendo tu landing…' : 'Detectar con IA'}
+                    </button>
+                  </div>
+                  {detFormato.estado !== 'idle' && detFormato.estado !== 'leyendo' && detFormato.motivo && (
+                    <p className={`mb-1.5 text-[11.5px] rounded-md px-2.5 py-1.5 ${detFormato.estado === 'error' ? 'text-amber-300 bg-amber-500/10' : 'text-brand-300 bg-brand-500/10'}`}>
+                      {detFormato.estado === 'error' ? 'No pude detectarlo: ' : 'Kombi: '}{detFormato.motivo}
+                    </p>
+                  )}
                   <select value={prodDraft.formato} onChange={e => setProdDraft({ ...prodDraft, formato: e.target.value })}
                     className="w-full px-2.5 py-1.5 text-sm bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-brand-500">
                     {FORMATOS_PRODUCTO.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
@@ -3439,6 +3473,7 @@ export default function ArranqueSection({ addToast, onGoToSection, modoAlta = fa
               {wizPaso < 4 ? (
                 <button onClick={() => {
                   if (wizPaso === 1 && !prodDraft.nombre.trim()) { addToast?.({ type: 'error', message: 'Ponele nombre al producto' }); return; }
+                  if (wizPaso === 1 && !prodDraft.formato) detectarFormato(prodDraft);
                   if (wizPaso === 2 && metaConnected && availableAccounts.length === 0 && !loadingAccounts) loadAdAccounts();
                   if (wizPaso === 2 && !prodDraft.claves.trim()) {
                     const primera = prodDraft.nombre.trim().split(/\s+/).find(w => w.length >= 4) || '';

@@ -1,5 +1,5 @@
 // Admin de PLATAFORMA — distinto del rol "admin" del tablero (que es el dueño
-// de SU cuenta). El admin de plataforma es quien opera AdsLab como producto:
+// de SU cuenta). El admin de plataforma es quien opera Kombialo como producto:
 // ve los costos internos (saldos de OpenAI/Anthropic/Apify, Costos del header,
 // Gastos del stack) que una cuenta registrada normal no tiene por qué ver, y a
 // futuro es la cuenta que asiste a las que se van registrando.

@@ -97,7 +97,7 @@ export default function PublicarArmador({ producto, tarjetas, onVolver, onPublic
   const toggle = (k) => setSel(prev => { const n = new Set(prev); if (n.has(k)) n.delete(k); else n.add(k); return n; });
 
   // Vista previa de VIDEO tipo Drive (pedido del user): los de Drive usan el
-  // preview embebido (/file/<id>/preview); los subidos a AdsLab se firman y
+  // preview embebido (/file/<id>/preview); los subidos a Kombialo se firman y
   // se reproducen en un <video> directo.
   const [videoPrev, setVideoPrev] = useState(null); // { name, driveUrl? , fileUrl?, cargando }
   // Filtro de tarjetas (pedido del user): por defecto solo las APROBADAS (las
@@ -405,11 +405,11 @@ export default function PublicarArmador({ producto, tarjetas, onVolver, onPublic
       const msg = `${hechos.length}/${lotes.length} campaña${lotes.length === 1 ? '' : 's'} creada${hechos.length === 1 ? '' : 's'}${enPausa ? ' en pausa' : ''} 🚀`;
       addToast?.({ type: huboError ? 'warning' : 'success', message: msg });
       // Notificación del navegador: por si estás en otra pestaña esperando.
-      try { if ('Notification' in window && Notification.permission === 'granted') new Notification('AdsLab · Publicación lista ✓', { body: msg }); } catch {}
+      try { if ('Notification' in window && Notification.permission === 'granted') new Notification('Kombialo · Publicación lista ✓', { body: msg }); } catch {}
     } else {
       setFase('error');
       addToast?.({ type: 'error', message: 'No se pudo crear ninguna campaña — mirá el detalle.' });
-      try { if ('Notification' in window && Notification.permission === 'granted') new Notification('AdsLab · La publicación falló', { body: 'Mirá el detalle en el Publicador.' }); } catch {}
+      try { if ('Notification' in window && Notification.permission === 'granted') new Notification('Kombialo · La publicación falló', { body: 'Mirá el detalle en el Publicador.' }); } catch {}
     }
   }, [listo, lotes, loteMax, account, template, preset, producto, presupuesto, adsPorSet, enPausa, nombreBase, fechaCorta, mensaje, titular, programada, nombresCampanas, addToast, onPublicadas]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -602,7 +602,7 @@ export default function PublicarArmador({ producto, tarjetas, onVolver, onPublic
             ) : estaticos.length === 0 ? (
               <p className="text-sm text-gray-400">Este producto todavía no tiene estáticos en la galería.</p>
             ) : (
-              <div className="grid gap-1.5" style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))` }}>
+              <div className="grid gap-1.5 max-h-[58vh] overflow-y-auto overscroll-contain pr-1 rounded-lg" style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))` }}>
                 {estaticos.map(e => {
                   const k = `i:${e.id}`;
                   const on = sel.has(k);
@@ -636,15 +636,31 @@ export default function PublicarArmador({ producto, tarjetas, onVolver, onPublic
           </section>
 
 
-          {/* Barra de avance al paso 2: pegada abajo, siempre a mano */}
-          <div className="sticky bottom-3 z-30">
-            <div className="flex items-center gap-3 rounded-2xl border border-gray-200 dark:border-gray-700 bg-white/95 dark:bg-gray-900/95 backdrop-blur px-4 py-3 shadow-xl">
-              <p className="text-sm font-bold text-gray-900 dark:text-gray-100 tabular-nums">
+          {/* Barra de avance al paso 2 (prototipo A elegido): fina, pegada al
+              fondo de la pantalla a todo el ancho, con miniaturas de lo elegido.
+              Va en el flujo, quieta debajo de la galería: la galería scrollea
+              en su propio recuadro, así la barra nunca se pone encima. */}
+          <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900">
+            <div className="flex items-center gap-3 px-4 py-2">
+              {elegidos.length > 0 && (
+                <span className="hidden sm:flex shrink-0">
+                  {elegidos.slice(0, 5).map((x, i) => {
+                    const img = x.tipo === 'imagen' ? (estaticos || []).find(e => e.id === x.id)?.imageUrl : null;
+                    return (
+                      <span key={x.key} className={`w-7 h-7 rounded-md border-2 border-white dark:border-gray-900 overflow-hidden bg-gray-200 dark:bg-gray-700 flex items-center justify-center ${i ? '-ml-2' : ''}`}>
+                        {img ? <img src={img} alt="" className="w-full h-full object-cover" /> : <Film size={12} className="text-gray-500 dark:text-gray-400" />}
+                      </span>
+                    );
+                  })}
+                  {elegidos.length > 5 && <span className="-ml-2 w-7 h-7 rounded-md border-2 border-white dark:border-gray-900 bg-brand-600 text-white text-[10px] font-bold flex items-center justify-center">+{elegidos.length - 5}</span>}
+                </span>
+              )}
+              <p className="text-sm font-bold text-gray-900 dark:text-gray-100 tabular-nums min-w-0 truncate">
                 {elegidos.length} creativo{elegidos.length === 1 ? '' : 's'}
                 <span className="font-normal text-gray-400"> · {nVideos} video{nVideos === 1 ? '' : 's'} · {nImagenes} imagen{nImagenes === 1 ? '' : 'es'}</span>
               </p>
               <button onClick={() => setPaso(2)} disabled={elegidos.length === 0}
-                className="ml-auto inline-flex items-center gap-1.5 px-4 py-2 text-sm font-bold text-white bg-brand-600 hover:bg-brand-700 rounded-lg transition disabled:opacity-40">
+                className="ml-auto shrink-0 inline-flex items-center gap-1.5 px-4 py-2 text-sm font-bold text-white bg-brand-600 hover:bg-brand-700 rounded-lg transition disabled:opacity-40">
                 Siguiente: armar campañas <ChevronRight size={14} />
               </button>
             </div>

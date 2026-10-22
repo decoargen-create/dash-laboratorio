@@ -1,13 +1,13 @@
-// Producción — MUEVE un video que quedó en AdsLab (Supabase Storage) a Google
+// Producción — MUEVE un video que quedó en Kombialo (Supabase Storage) a Google
 // Drive. Corre 100% server-side porque:
 //   - El bucket 'creativos' es por-usuario (RLS): un admin NO puede leer el
 //     archivo que subió un editor desde el navegador. El service role sí.
 //   - Sube a Drive con el OAuth del dueño (getDriveContext), igual que una subida
 //     normal, a la MISMA carpeta de la tarjeta.
 //
-// Seguridad de datos: SOLO borra la copia de AdsLab DESPUÉS de confirmar que el
+// Seguridad de datos: SOLO borra la copia de Kombialo DESPUÉS de confirmar que el
 // archivo quedó en Drive (id devuelto por Google). Si algo falla antes, no toca
-// nada — el video sigue intacto en AdsLab.
+// nada — el video sigue intacto en Kombialo.
 //
 // POST { cardId, storagePath } → { ok, archivo } | { error }
 
@@ -54,12 +54,12 @@ export default async function handler(req, res) {
 
   const archivos = Array.isArray(card.archivos) ? card.archivos : [];
   // El storagePath tiene que pertenecer a un archivo de ESTA tarjeta (no aceptamos
-  // un path arbitrario) y tiene que ser de AdsLab.
+  // un path arbitrario) y tiene que ser de Kombialo.
   const archivo = archivos.find(f => f && f.storagePath === storagePath && f.destino !== 'drive');
-  if (!archivo) return respondJSON(res, 400, { error: 'Ese archivo no es un video de AdsLab de esta tarjeta.' });
+  if (!archivo) return respondJSON(res, 400, { error: 'Ese archivo no es un video de Kombialo de esta tarjeta.' });
 
   // 2) Contexto de Drive (OAuth del dueño). Si falla transitoriamente, NO tocamos
-  // nada — el video sigue en AdsLab y se reintenta luego.
+  // nada — el video sigue en Kombialo y se reintenta luego.
   const ctx = await getDriveContext();
   if (!ctx || ctx.failed) {
     return respondJSON(res, 503, { error: ctx?.failed ? 'Drive está conectado pero Google no respondió ahora. Reintentá.' : 'Drive no está conectado.' });
@@ -83,9 +83,9 @@ export default async function handler(req, res) {
 
     // 4) Bajamos los bytes del bucket (service role → sin RLS).
     const dl = await svc.storage.from(BUCKET).download(storagePath);
-    if (dl.error || !dl.data) return respondJSON(res, 404, { error: `No pude leer el video de AdsLab: ${dl.error?.message || 'sin datos'}` });
+    if (dl.error || !dl.data) return respondJSON(res, 404, { error: `No pude leer el video de Kombialo: ${dl.error?.message || 'sin datos'}` });
     const buf = Buffer.from(await dl.data.arrayBuffer());
-    if (buf.length === 0) return respondJSON(res, 422, { error: 'El video de AdsLab está vacío (0 bytes) — no lo muevo.' });
+    if (buf.length === 0) return respondJSON(res, 422, { error: 'El video de Kombialo está vacío (0 bytes) — no lo muevo.' });
 
     const finalName = String(archivo.name || 'video.mp4').replace(/[\r\n\t]+/g, ' ').trim() || 'video.mp4';
     const ext = (finalName.split('.').pop() || 'mp4').toLowerCase();
@@ -126,7 +126,7 @@ export default async function handler(req, res) {
     // el que subimos. Solo si coincide, damos por buena la copia.
     const driveSize = Number(meta.size || 0);
     if (driveSize && driveSize !== buf.length) {
-      return respondJSON(res, 502, { error: `El archivo en Drive quedó incompleto (${driveSize}/${buf.length} bytes) — NO borro el de AdsLab.` });
+      return respondJSON(res, 502, { error: `El archivo en Drive quedó incompleto (${driveSize}/${buf.length} bytes) — NO borro el de Kombialo.` });
     }
 
     // 7) Reemplazamos el archivo en la tarjeta (adslab → drive), preservando ts y
@@ -154,7 +154,7 @@ export default async function handler(req, res) {
         .select('archivos, updated_at').eq('id', cardId).maybeSingle();
       const base = Array.isArray(fresh?.archivos) ? fresh.archivos : archivos;
       const target = base.find(f => f && f.storagePath === storagePath);
-      // Ya no está como AdsLab (otro proceso lo migró/borró) → nada que reescribir.
+      // Ya no está como Kombialo (otro proceso lo migró/borró) → nada que reescribir.
       if (!target || target.destino === 'drive') { wrote = true; break; }
       const nuevos = base.map(f => (f && f.storagePath === storagePath) ? nuevo : f);
       let q = svc.from('produccion_asignaciones')
@@ -167,11 +167,11 @@ export default async function handler(req, res) {
     }
     if (!wrote) {
       // El video YA está en Drive; solo falló actualizar el registro. NO borramos
-      // AdsLab (así no queda huérfano) y avisamos para reintentar.
+      // Kombialo (así no queda huérfano) y avisamos para reintentar.
       return respondJSON(res, 500, { error: `El video subió a Drive pero no pude actualizar la tarjeta${lastErr ? `: ${lastErr.message}` : ' (conflicto de escritura)'}. Reintentá.` });
     }
 
-    // 8) Recién ahora borramos la copia de AdsLab (ya confirmada en Drive y con la
+    // 8) Recién ahora borramos la copia de Kombialo (ya confirmada en Drive y con la
     // tarjeta apuntando a Drive). Best-effort: si falla, no rompe (queda huérfano).
     try { await svc.storage.from(BUCKET).remove([storagePath]); } catch { /* best-effort */ }
 

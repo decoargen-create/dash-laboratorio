@@ -13,7 +13,13 @@ export const EVENTOS_FECHA = [
   { key: 'dia_nino',     label: '🧸 Día del Niño' },
   { key: 'san_valentin', label: '❤️ San Valentín' },
   { key: 'hot_sale',     label: '🔥 Hot Sale' },
-  { key: 'cyber_monday', label: '💻 CyberMonday' },
+  // Campaña Cyber en 4 etapas (pedido 20/10). Misma paleta violeta/azul en
+  // todas; el sello OFICIAL solo en "Ya llega" y CyberMonday (las bases de la
+  // CACE no permiten comunicar ofertas con la marca del evento antes del 2/11).
+  { key: 'pre_cyber',    label: '🚀 Pre-Cyber (adelanto, hasta 1/11)' },
+  { key: 'cyber_teaser', label: '⏳ Ya llega el Cyber (sin precio)' },
+  { key: 'cyber_monday', label: '💻 CyberMonday (2 al 4/11)' },
+  { key: 'cyber_week',   label: '📅 Cyber Week (5 al 8/11)' },
   { key: 'black_friday', label: '🖤 BlackFriday' },
   { key: 'navidad',      label: '🎄 Navidad' },
   { key: 'ano_nuevo',    label: '🎆 Año Nuevo' },

@@ -163,7 +163,7 @@ export const ADS_7D_DEMO = [
   },
 ];
 
-// Productos tal como ya están cargados en AdsLab.
+// Productos tal como ya están cargados en Kombialo.
 export const PRODUCTOS_DEMO = [
   { id: 'p-cepillo', nombre: 'Cepillo Drenaje Linfatico' },
   { id: 'p-crema', nombre: 'Crema Facial' },

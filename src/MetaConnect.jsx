@@ -2,7 +2,7 @@
 //
 // Antes esto vivía adentro de CampanasTracker: para conectar una cuenta había
 // que navegar a Meta Ads → Campañas y recién ahí aparecía el form. Ahora el
-// botón "Conectar cuenta" vive en el header de AdsLab y está disponible desde
+// botón "Conectar cuenta" vive en el header de Kombialo y está disponible desde
 // cualquier sección; CampanasTracker reusa las mismas piezas.
 //
 // Dos caminos de conexión (los dos terminan en una fila de meta_connections):
@@ -190,7 +190,7 @@ export function useMetaAdAccounts(connections) {
 // ========================================================================
 // Botón "Conectar con Facebook" (OAuth) — el flujo estilo Ads Uploader.
 // Solo aparece si la app de Meta está configurada en el server
-// (META_APP_ID + META_APP_SECRET). Cada user de AdsLab que lo usa conecta
+// (META_APP_ID + META_APP_SECRET). Cada user de Kombialo que lo usa conecta
 // SU Meta: el callback guarda la conexión a su nombre en meta_connections.
 // Mientras la app no pase App Review, solo cuentas con rol en la app pueden
 // usarlo; post-review, cualquier colega/cliente.
@@ -482,7 +482,7 @@ export function MetaConnectModal({ open, onClose, connections, loading, onConnec
           <div className="flex-1 min-w-0">
             <h3 className="text-sm font-bold text-gray-900 dark:text-gray-100">Cuentas publicitarias</h3>
             <p className="text-[11px] text-gray-500 dark:text-gray-400">
-              Conectá tu Meta para trackear campañas, ads y métricas dentro de AdsLab.
+              Conectá tu Meta para trackear campañas, ads y métricas dentro de Kombialo.
             </p>
           </div>
           <button onClick={onClose} className="p-1.5 rounded-lg text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 transition" aria-label="Cerrar">
@@ -546,7 +546,7 @@ export function MetaConnectModal({ open, onClose, connections, loading, onConnec
 
 // ========================================================================
 // Botón del header — estado de conexión + acceso al modal desde cualquier
-// sección de AdsLab. Sin conexiones muestra el CTA azul de Meta; con
+// sección de Kombialo. Sin conexiones muestra el CTA azul de Meta; con
 // conexiones queda como chip discreto con la cuenta activa.
 // ========================================================================
 export function MetaConnectButton({ addToast }) {

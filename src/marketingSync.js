@@ -415,6 +415,18 @@ export async function pullMarketingFromCloud() {
     try { localStorage.removeItem('adslab-marketing-creative-refresh-cache'); } catch {}
     try { localStorage.removeItem('adslab-marketing-execution-log'); } catch {}
     try { localStorage.removeItem('adslab-marketing-cost-log'); } catch {}
+    // Los pesados de verdad: cachés de Meta, backups locales, chats del
+    // copiloto, imágenes cacheadas y las brands de competencia (estas se
+    // vuelven a traer del cloud dos pasos más abajo en este mismo pull).
+    // Sin esto, con el storage lleno los productos NUNCA se guardaban y la
+    // pantalla quedaba en "Creá tu primer producto" (reportado 17/10).
+    try {
+      const PREFIJOS_DESCARTABLES = ['adslab-meta-cache-', 'backup-', 'adslab-marketing-copilot-', 'adslab-creativo-img-cache', KEYS.brandsPrefix];
+      for (let i = localStorage.length - 1; i >= 0; i--) {
+        const k = localStorage.key(i);
+        if (k && PREFIJOS_DESCARTABLES.some(p => k.startsWith(p))) localStorage.removeItem(k);
+      }
+    } catch {}
     // 2) Retry full data.
     try {
       localStorage.setItem(KEYS.productos, JSON.stringify(productosArr));

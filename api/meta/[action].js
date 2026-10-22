@@ -112,9 +112,9 @@ async function handleConnectUrl(req, res) {
   if (!appId) return respondJSON(res, 500, { error: 'META_APP_ID no configurada. Falta crear la app de Meta y cargar sus credenciales en Vercel.' });
   if (!secret) return respondJSON(res, 500, { error: 'AUTH_SECRET no configurada' });
 
-  // userId de AdsLab — requerido en este flujo (multi-usuario = DB).
+  // userId de Kombialo — requerido en este flujo (multi-usuario = DB).
   const userId = isSupabaseConfigured() ? await getUserIdFromAuth(req) : null;
-  if (!userId) return respondJSON(res, 401, { error: 'Iniciá sesión en AdsLab antes de conectar Meta.' });
+  if (!userId) return respondJSON(res, 401, { error: 'Iniciá sesión en Kombialo antes de conectar Meta.' });
 
   let body = {};
   try {
@@ -230,7 +230,7 @@ async function handleCallback(req, res) {
     return redirectWithError(res, origin, returnTo, `Intercambio de token falló: ${err.message}`);
   }
 
-  // MULTI-USUARIO: si el connect se inició logueado en AdsLab (connect-url),
+  // MULTI-USUARIO: si el connect se inició logueado en Kombialo (connect-url),
   // el state trae el userId → guardamos la conexión en meta_connections a su
   // nombre. Cada colega/cliente conecta su propio Meta. Fallback a cookie
   // (legacy single-user) si no hay userId o falla el insert.
@@ -331,13 +331,9 @@ async function handleAdAccounts(req, res) {
     // Business Managers SOCIOS (compartidas entre BMs) no aparecen ahí. Se
     // completan con los edges de negocio (requiere business_management; si
     // el token no lo tiene, seguimos solo con lo directo).
-    const debug = url.searchParams.get('debug') === '1'
-      ? { directas: todas.length, negocios: [], bizError: null }
-      : null;
     try {
       const biz = await graphGet('me/businesses', token, { fields: 'id,name', limit: 25 });
       for (const b of (biz.data || []).slice(0, 15)) {
-        const diag = { id: b.id, name: b.name, owned: 0, client: 0, errores: [] };
         for (const edge of ['owned_ad_accounts', 'client_ad_accounts']) {
           let cursor = null;
           for (let p = 0; p < 4; p++) {
@@ -347,20 +343,14 @@ async function handleAdAccounts(req, res) {
             };
             if (cursor) params.after = cursor;
             let d;
-            try { d = await graphGet(`${b.id}/${edge}`, token, params); }
-            catch (e) { diag.errores.push(`${edge}: ${e.message}`.slice(0, 160)); break; }
+            try { d = await graphGet(`${b.id}/${edge}`, token, params); } catch { break; }
             for (const a of (d.data || [])) todas.push({ ...a, business_name: a.business_name || b.name });
-            diag[edge === 'owned_ad_accounts' ? 'owned' : 'client'] += (d.data || []).length;
             cursor = d.paging?.next && d.paging?.cursors?.after ? d.paging.cursors.after : null;
             if (!cursor) break;
           }
         }
-        if (debug) debug.negocios.push(diag);
       }
-    } catch (e) {
-      // sin business_management no hay edges de negocio
-      if (debug) debug.bizError = String(e.message).slice(0, 200);
-    }
+    } catch { /* sin business_management no hay edges de negocio */ }
 
     // account_status: 1=ACTIVE, 2=DISABLED, 3=UNSETTLED, 7=PENDING_RISK_REVIEW, ...
     const vistos = new Set();
@@ -376,7 +366,7 @@ async function handleAdAccounts(req, res) {
         timezone: a.timezone_name,
         business: a.business_name || null,
       }));
-    return respondJSON(res, 200, { accounts, total: accounts.length, ...(debug ? { debug } : {}) });
+    return respondJSON(res, 200, { accounts, total: accounts.length });
   } catch (err) {
     return respondJSON(res, err.status || 502, { error: err.message });
   }
@@ -2447,7 +2437,7 @@ async function handleManagerTable(req, res) {
 }
 
 // ========================================================================
-// PUBLICAR CAMPAÑAS — el lanzador de AdsLab
+// PUBLICAR CAMPAÑAS — el lanzador de Kombialo
 // ========================================================================
 // Crea en Meta una estructura completa de venta a partir de posts existentes
 // (nombre + post id), con las tres recetas del equipo:
@@ -2473,7 +2463,7 @@ async function handleLaunchPrereqs(req, res) {
   try {
     const [pixelsR, pagesR] = await Promise.allSettled([
       graphGet(`${accountId}/adspixels`, token, { fields: 'id,name', limit: 25 }),
-      graphGet('me/accounts', token, { fields: 'id,name', limit: 50 }),
+      graphGet('me/accounts', token, { fields: 'id,name,instagram_business_account{id,username}', limit: 100 }),
     ]);
     return respondJSON(res, 200, {
       pixels: pixelsR.status === 'fulfilled' ? (pixelsR.value.data || []) : [],
@@ -2532,6 +2522,10 @@ async function handleLaunchCampaign(req, res) {
   const duplicarAds = body.duplicarAds !== false;
   const pageId = String(body.pageId || '').trim();
   const pixelId = String(body.pixelId || '').trim();
+  // Instagram del anuncio: 'auto' (default) = el IG vinculado a la página dueña
+  // de cada post; un id = esa cuenta para todos; 'none' = solo Facebook.
+  // Sin esto los anuncios salían SOLO en Facebook (reportado 17/10).
+  const igElegido = String(body.instagramUserId || 'auto').trim() || 'auto';
   // ABO: puja POR CONJUNTO (array alineado con los conjuntos); si un índice
   // falta o es inválido, cae a la puja base.
   const pujasArr = Array.isArray(body.pujas) ? body.pujas.map(Number) : null;
@@ -2581,6 +2575,70 @@ async function handleLaunchCampaign(req, res) {
     : estructura === 'abo_bidcap' ? 'LOWEST_COST_WITH_BID_CAP' : 'COST_CAP';
   const esCbo = !estructura.startsWith('abo');
 
+  // PROGRESO REAL (pedido del user: barra de pasos con tildes): con
+  // body.stream la respuesta es NDJSON y se emite un evento por cada cosa que
+  // Meta confirma (campaña, cada conjunto, cada anuncio) y al final el
+  // resultado. Sin stream, responde igual que siempre (un JSON al final).
+  const stream = body.stream === true;
+  const emit = (ev) => { if (stream) { try { res.write(JSON.stringify(ev) + '\n'); } catch {} } };
+  const terminar = (status, obj) => {
+    if (!stream) return respondJSON(res, status, obj);
+    emit({ type: 'done', status, ...obj });
+    return res.end();
+  };
+  if (stream) {
+    res.status(200);
+    res.setHeader('Content-Type', 'application/x-ndjson; charset=utf-8');
+    res.setHeader('Cache-Control', 'no-cache, no-transform');
+    res.setHeader('X-Accel-Buffering', 'no');
+    emit({ type: 'start' });
+  }
+
+    // Páginas candidatas para los post ids pelados (sin "pageId_"): la elegida,
+  // las que la CUENTA PUBLICITARIA puede promocionar (promote_pages — incluye
+  // páginas de Business Managers que no aparecen en me/accounts, caso
+  // 348837031656775 reportado 17/10) y las que administra el usuario.
+  // La página dueña se descubre creando el creative: si Meta responde
+  // "la publicación no pertenece a la página" (subcode 3858759) probamos la
+  // siguiente. Leer el post con GET no sirve: los posts de anuncio (dark
+  // posts) no se pueden leer con el token de usuario.
+  let paginas = [];
+  try {
+    const [promo, mias] = await Promise.allSettled([
+      graphGet(`${accountId}/promote_pages`, token, { fields: 'id,instagram_business_account{id}', limit: 100 }),
+      graphGet('me/accounts', token, { fields: 'id,instagram_business_account{id}', limit: 100 }),
+    ]);
+    const vistas = new Set();
+    for (const r of [promo, mias]) {
+      if (r.status !== 'fulfilled') continue;
+      for (const p of (r.value?.data || [])) {
+        if (vistas.has(String(p.id))) continue;
+        vistas.add(String(p.id)); paginas.push(p);
+      }
+    }
+  } catch { paginas = []; }
+  const igDePagina = new Map(paginas.map(p => [String(p.id), p.instagram_business_account?.id || null]));
+  const candidatasPagina = [pageId, ...paginas.map(p => String(p.id)).filter(id => id !== pageId)].filter(Boolean);
+  // postId pelado → pageId que funcionó (se reusa en los otros conjuntos).
+  const paginaDePost = new Map();
+  const esNoPertenece = (msg) => /3858759|no pertenece a la p[aá]gina|does not belong to the page/i.test(String(msg || ''));
+  // Fallback del modo automático: si la página dueña del post no tiene IG
+  // vinculado (ej. "Vane Navarro"), va el IG de la página elegida en el form
+  // (Natural VYA → naturalvya.arg) y, si tampoco, la primera cuenta de IG de
+  // la cuenta publicitaria. Antes quedaba "Usar página de Facebook".
+  let igCuenta = null;
+  if (igElegido === 'auto' && !igDePagina.get(String(pageId))) {
+    try {
+      const r = await graphGet(`${accountId}/instagram_accounts`, token, { fields: 'id', limit: 5 });
+      igCuenta = r.data?.[0]?.id || null;
+    } catch { igCuenta = null; }
+  }
+  const igPara = (storyId) => {
+    if (igElegido === 'none') return null;
+    if (igElegido !== 'auto') return igElegido;
+    return igDePagina.get(String(storyId).split('_')[0]) || igDePagina.get(String(pageId)) || igCuenta || null;
+  };
+
   const resumen = { campaignId: null, adsets: [], errores: [] };
   try {
     // 1. Campaña.
@@ -2598,6 +2656,7 @@ async function handleLaunchCampaign(req, res) {
     else campParams.is_adset_budget_sharing_enabled = 'false';
     const camp = await graphPost(`${accountId}/campaigns`, token, campParams);
     resumen.campaignId = camp.id;
+    emit({ type: 'campaign', id: camp.id });
 
     // 2. Conjuntos.
     //    duplicar → cada conjunto lleva TODOS los anuncios (Deep Pocket: 8
@@ -2638,10 +2697,12 @@ async function handleLaunchCampaign(req, res) {
         adset = await graphPost(`${accountId}/adsets`, token, adsetParams);
       } catch (e) {
         resumen.errores.push(`Conjunto C${i + 1}: ${e.message}`);
+        emit({ type: 'adset', i, ok: false, error: e.message, ads: grupo.length });
         continue;
       }
       const fila = { id: adset.id, name: adsetParams.name, ads: [] };
       resumen.adsets.push(fila);
+      emit({ type: 'adset', i, ok: true, ads: grupo.length });
 
       // 3. Anuncios del conjunto: creative desde el post existente + ad.
       //    De a CONCURRENCIA_ADS en paralelo: con 8 conjuntos duplicados esto
@@ -2652,13 +2713,33 @@ async function handleLaunchCampaign(req, res) {
       //    con el error. Mejor una campaña con 39 de 40 y el detalle de cuál
       //    faltó que un 500 sin saber qué quedó creado en Meta.
       const crearAd = async (ad) => {
-        const storyId = ad.postId.includes('_') ? ad.postId : `${pageId}_${ad.postId}`;
-        const adName = ad.name || `Ad ${storyId.split('_')[1] || storyId}`;
+        const adName = ad.name || `Ad ${ad.postId.split('_').pop()}`;
         try {
-          const creative = await graphPost(`${accountId}/adcreatives`, token, {
+          // Creative probando páginas hasta dar con la dueña del post.
+          const crearCreative = async (storyId) => graphPost(`${accountId}/adcreatives`, token, {
             name: adName,
             object_story_id: storyId,
+            ...(igPara(storyId) ? { instagram_user_id: String(igPara(storyId)) } : {}),
           });
+          let creative = null;
+          if (ad.postId.includes('_')) {
+            creative = await crearCreative(ad.postId);
+          } else {
+            const conocida = paginaDePost.get(ad.postId);
+            const orden = conocida ? [conocida] : candidatasPagina;
+            let ultimoError = null;
+            for (const pid of orden) {
+              try {
+                creative = await crearCreative(`${pid}_${ad.postId}`);
+                paginaDePost.set(ad.postId, pid);
+                break;
+              } catch (e) {
+                ultimoError = e;
+                if (!esNoPertenece(e.message)) throw e;
+              }
+            }
+            if (!creative) throw new Error(`El post ${ad.postId} no es de ninguna página a la que esta cuenta tenga acceso (${candidatasPagina.length} probadas). Pegalo como «pageId_postId». ${ultimoError?.message || ''}`.trim());
+          }
           const nuevo = await graphPost(`${accountId}/ads`, token, {
             name: adName,
             adset_id: adset.id,
@@ -2671,7 +2752,11 @@ async function handleLaunchCampaign(req, res) {
         }
       };
       for (let j = 0; j < grupo.length; j += CONCURRENCIA_ADS) {
-        const tanda = await Promise.all(grupo.slice(j, j + CONCURRENCIA_ADS).map(crearAd));
+        const tanda = await Promise.all(grupo.slice(j, j + CONCURRENCIA_ADS).map(async (ad) => {
+          const r = await crearAd(ad);
+          emit({ type: 'ad', i, ok: r.ok, name: r.name, error: r.error || null });
+          return r;
+        }));
         fila.ads.push(...tanda);
       }
     }
@@ -2697,7 +2782,7 @@ async function handleLaunchCampaign(req, res) {
         });
       }
     } catch { /* historial best-effort */ }
-    return respondJSON(res, 200, {
+    return terminar(200, {
       ok: resumen.errores.length === 0 && creados > 0,
       ...resumen,
       creados,
@@ -2705,7 +2790,7 @@ async function handleLaunchCampaign(req, res) {
     });
   } catch (e) {
     // Si la campaña no llegó a crearse, no quedó nada colgado en Meta.
-    return respondJSON(res, e.status && e.status < 500 ? e.status : 500, {
+    return terminar(e.status && e.status < 500 ? e.status : 500, {
       error: e.message,
       ...resumen,
     });
@@ -2729,7 +2814,7 @@ async function handleLaunchCampaign(req, res) {
 // Meta devuelve el MISMO error críptico ("Unsupported post request. Object
 // with ID 'act_X' does not exist, cannot be loaded due to missing
 // permissions...") cuando el token puede LEER la cuenta pero no ESCRIBIR —
-// p. ej. una conexión OAuth hecha cuando AdsLab pedía solo ads_read. Lo
+// p. ej. una conexión OAuth hecha cuando Kombialo pedía solo ads_read. Lo
 // traducimos a algo accionable en vez de mandar al usuario a la doc de Graph.
 function traducirErrorMetaEscritura(msg) {
   const m = String(msg || '');
@@ -2881,7 +2966,7 @@ async function handleUploadAdVideos(req, res) {
     try {
       let fileUrl = String(v?.fileUrl || '').trim();
       if (!fileUrl && v?.storagePath) {
-        if (!sb) throw new Error('Supabase no está configurado en el server (SUPABASE_SERVICE_ROLE_KEY) — no puedo firmar archivos de AdsLab');
+        if (!sb) throw new Error('Supabase no está configurado en el server (SUPABASE_SERVICE_ROLE_KEY) — no puedo firmar archivos de Kombialo');
         const { data, error: e } = await sb.storage.from('creativos').createSignedUrl(String(v.storagePath), 3600);
         if (e || !data?.signedUrl) throw new Error(`No pude firmar el archivo (${e?.message || 'sin URL'})`);
         fileUrl = data.signedUrl;

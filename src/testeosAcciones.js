@@ -1,6 +1,6 @@
 // Prender y pausar desde el tablero.
 //
-// Es el único lugar del front que le pide a AdsLab que ESCRIBA en la cuenta
+// Es el único lugar del front que le pide a Kombialo que ESCRIBA en la cuenta
 // publicitaria, así que concentra las tres cosas que hay que hacer bien:
 // mandar el pedido, entender una respuesta a medias (Meta no da
 // transacciones: pueden salir 3 de 5) y dejar armado el deshacer.

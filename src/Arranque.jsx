@@ -122,6 +122,7 @@ import { setCompAds, getCompAds, hydrateCompetidoresAds, removeCompAds } from '.
 import { stringifyApiError } from './apiHelpers.js';
 import { trackQuotaFailure, isQuotaError, removeFromQuotaQueue } from './quotaRetryStore.js';
 import AnimatedCounter from './AnimatedCounter.jsx';
+import { getSyncStatus, subscribeSyncStatus } from './syncStatusStore.js';
 import ProductoCostsModal from './ProductoCostsModal.jsx';
 import ProductoHistorialModal from './ProductoHistorialModal.jsx';
 
@@ -988,6 +989,11 @@ function StepRow({ step, liveIdeas, onRerun, rerunBusy = false }) {
 
 
 export default function ArranqueSection({ addToast, onGoToSection }) {
+  // Mientras se traen los productos de la nube (login en una PC nueva o con
+  // la caché vacía) NO mostramos el onboarding de "primer producto": confundía,
+  // parecía que se habían borrado todos. Mostramos un "trayendo…" en su lugar.
+  const [sincronizando, setSincronizando] = useState(() => getSyncStatus()?.status === 'pulling');
+  useEffect(() => subscribeSyncStatus(s => setSincronizando(s.status === 'pulling')), []);
   const [productos, setProductos] = useState(() => {
     const prods = loadJSON(PRODUCTOS_KEY, []);
     let mutated = false;
@@ -1408,7 +1414,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
     try { localStorage.setItem('adslab-productos-vista', vista); } catch {}
   }, [vista]);
   const [prodDraft, setProdDraft] = useState({ nombre: '', landingUrl: '', descripcion: '' });
-  // Wizard de ALTA de producto (AdsLab OS, etapa 1): el producto nace
+  // Wizard de ALTA de producto (Kombialo OS, etapa 1): el producto nace
   // enchufado — cuenta publicitaria, campaña base de referencia, break-even
   // y primeros competidores, todo en el alta en vez de configurarse después.
   const [wizPaso, setWizPaso] = useState(1);
@@ -3221,7 +3227,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
           </div>
         </div>
 
-        {/* Alta de producto: WIZARD de 3 pasos (AdsLab OS, etapa 1). El
+        {/* Alta de producto: WIZARD de 3 pasos (Kombialo OS, etapa 1). El
             producto nace enchufado: cuenta publicitaria, campaña base de
             referencia, break-even y competidores — todo acá, una sola vez. */}
         {showProdForm && (
@@ -3358,7 +3364,13 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
         )}
 
         {/* Lista de productos existentes */}
-        {productos.length === 0 ? (
+        {productos.length === 0 && sincronizando ? (
+          <div className="border border-gray-200 dark:border-gray-700 rounded-2xl p-10 flex flex-col items-center gap-3 text-center">
+            <Loader2 size={22} className="animate-spin text-brand-500" />
+            <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">Trayendo tus productos…</p>
+            <p className="text-xs text-gray-400">Se están sincronizando desde la nube. Tarda unos segundos.</p>
+          </div>
+        ) : productos.length === 0 ? (
           /* ONBOARDING DE PRIMER USO — un usuario nuevo cae acá sin productos.
              En vez de un empty-state seco, lo recibimos, le mostramos el flujo
              en 3 pasos y le damos un CTA claro para arrancar. */
@@ -3367,7 +3379,7 @@ export default function ArranqueSection({ addToast, onGoToSection }) {
               <div className="w-14 h-14 mx-auto rounded-2xl bg-gradient-to-br from-brand-500 to-amber-500 flex items-center justify-center text-white shadow-lg mb-4">
                 <Sparkles size={26} />
               </div>
-              <h3 className="text-xl md:text-2xl font-extrabold text-gray-900 dark:text-gray-100">¡Bienvenido a AdsLab!</h3>
+              <h3 className="text-xl md:text-2xl font-extrabold text-gray-900 dark:text-gray-100">¡Bienvenido a Kombialo!</h3>
               <p className="text-sm text-gray-600 dark:text-gray-400 mt-2 max-w-md mx-auto">
                 Acá cargás un producto, analizamos los ads ganadores de tu competencia y te generamos ideas y creativos listos para publicar. Empecemos por tu primer producto.
               </p>

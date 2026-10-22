@@ -37,6 +37,7 @@ import { friendlyAIError } from './aiError.js';
 import { saveReferencial, getUsedAdIdsForProducto } from './galeriaReferenciales.js';
 import { startBulk, patchBulk, reportAdFinished, finishBulk, clearBulk, subscribeBulk } from './bulkProgressStore.js';
 import { withGenSlot, TARGET_INFLIGHT } from './genConcurrency.js';
+import { urlImagenGuardada, pedirGuardarImagenAd } from './adImagenes.js';
 import { EVENTOS_FECHA } from './eventosFecha.js';
 import BulkConfirmModal from './BulkConfirmModal.jsx';
 import { cacheAdImagesBatch, getCachedAdImageUrl, getCachedAdImageDataUrl } from './adImagesStore.js';
@@ -53,11 +54,10 @@ import { listBoards, createBoard, addItemsToBoard } from './marketingBoardsApi.j
 // Galería ahora vive como tab independiente en el workspace (Arranque),
 // no más como modal acá.
 
-// Máximo de ads por tanda: 10. Más allá saturaríamos rate limits de
-// gpt-image-2 (típicamente 5-15 RPM) y el browser quedaría unresponsive.
-// Con concurrencia 5 paralela y n=2 fijo, 10 ads × 2 variantes = 20 imágenes
-// en ~3 min, costo ~$3.60.
-const MAX_SELECCIONADOS = 10;
+// Máximo de ads por tanda: 20 (pedido 21/10, antes 10). Los ads se procesan
+// de a UNO (BULK_CONCURRENCY=1), así que el tope no satura el rate limit de
+// gpt-image: solo alarga la tanda (~75 s por ad → 20 ads ≈ 25 min).
+const MAX_SELECCIONADOS = 20;
 // Bajamos de 5 a 3 paralelos — gpt-image-2 tier 1 = 5 RPM, queremos margen
 // para no triggear el rate limit. El endpoint igual hace auto-retry con
 // backoff (15s, 30s) si OpenAI tira 429, así que los pico que sí lleguen
@@ -611,7 +611,7 @@ function BrandCard({ brand, ads, isScraping, adaptingAdIds, creandoAdIds, selecc
   // que el user pueda cerrar el overlay de error que ahora queda persistente.
   const isCompetidor = !!brand.isCompetidor;
   return (
-    <div className="group/brand bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-3 hover:border-amber-300 dark:hover:border-amber-700 transition">
+    <div className="group/brand self-start bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-3 hover:border-amber-300 dark:hover:border-amber-700 transition">
       <div className="flex items-center gap-2.5">
         <div className={`w-9 h-9 rounded-md flex items-center justify-center text-white font-bold text-sm shrink-0 ${
           isCompetidor
@@ -710,6 +710,15 @@ function BrandCard({ brand, ads, isScraping, adaptingAdIds, creandoAdIds, selecc
         <p className="text-[10px] text-gray-600 dark:text-gray-400 italic mt-1.5 line-clamp-1">"{brand.notas}"</p>
       )}
 
+      {/* Sin estáticos: aviso corto en vez de una tarjeta vacía gigante. */}
+      {ads.length === 0 && !isScraping && (
+        <p className="mt-2.5 text-[11px] text-gray-400 dark:text-gray-500 rounded-md bg-gray-50 dark:bg-gray-900/40 px-2.5 py-2">
+          {brand.lastScraped
+            ? 'Sin estáticos activos en la biblioteca de anuncios en el último scrape.'
+            : 'Todavía no se scrapeó — tocá Scrape para traer sus anuncios.'}
+        </p>
+      )}
+
       {/* Grilla de estáticos scrapeados */}
       {ads.length > 0 && (
         <BrandAdsGrid
@@ -744,14 +753,23 @@ function BrandCard({ brand, ads, isScraping, adaptingAdIds, creandoAdIds, selecc
 // (fetch server-side, sin referrer del browser). Si el proxy TAMBIÉN falla
 // (URL genuinamente expirada), recién ahí escondemos. Sin esto las miniaturas
 // de ads viejos/inactivos salían todas negras.
+// Orden de fuentes: copia guardada (no vence) → CDN de Meta → proxy → nada.
 function handleAdImgError(e, cdnUrl) {
   const img = e.currentTarget;
-  if (!img.dataset.proxied && cdnUrl) {
-    img.dataset.proxied = '1';
+  if (img.dataset.guardada === '1' && !img.dataset.step && cdnUrl) {
+    img.dataset.step = 'cdn';
+    img.src = cdnUrl;
+  } else if (img.dataset.step !== 'proxy' && cdnUrl) {
+    img.dataset.step = 'proxy';
     img.src = `/api/marketing/proxy-image?url=${encodeURIComponent(cdnUrl)}`;
   } else {
     img.style.display = 'none';
   }
+}
+// Si se vio desde Meta (no desde la copia), se manda a guardar la copia.
+function handleAdImgLoad(e, adId, cdnUrl) {
+  const img = e.currentTarget;
+  if (img.dataset.guardada !== '1' || img.dataset.step) pedirGuardarImagenAd(adId, cdnUrl);
 }
 
 function AdThumb({ ad, brandNombre, brandId = null, isCompetidor = false, fresh = false, adapting = false, creando = false, selected = false, selectionIndex = null, used = false, onAdapt, onCrearReferencial, onToggleSelect, onSaveToBoard = null, progress = null, onClearProgress = null }) {
@@ -801,7 +819,8 @@ function AdThumb({ ad, brandNombre, brandId = null, isCompetidor = false, fresh 
       window.removeEventListener('viora:ad-image-cached', onSaved);
     };
   }, [ad?.id]);
-  const thumb = cachedUrl || cdnThumb;
+  const guardada = cachedUrl ? null : (ad.storedImageUrl || urlImagenGuardada(ad.id));
+  const thumb = cachedUrl || guardada || cdnThumb;
   return (
     <div
       ref={containerRef}
@@ -824,9 +843,10 @@ function AdThumb({ ad, brandNombre, brandId = null, isCompetidor = false, fresh 
       title={ad.body?.slice(0, 200) || ad.headline || ''}
     >
       {thumb ? (
-        <img src={thumb} alt="" className="w-full h-full object-cover"
-          loading="lazy" decoding="async"
-          onError={(e) => handleAdImgError(e, cachedUrl ? cdnThumb : thumb)} />
+        <img key={thumb} src={thumb} alt="" className="w-full h-full object-cover"
+          loading="lazy" decoding="async" data-guardada={guardada ? '1' : undefined}
+          onLoad={(e) => { if (!cachedUrl && cdnThumb) handleAdImgLoad(e, ad.id, cdnThumb); }}
+          onError={(e) => handleAdImgError(e, cdnThumb)} />
       ) : (
         <div className="w-full h-full flex items-center justify-center">
           <ImageIcon size={20} className="text-gray-300" />
@@ -1651,23 +1671,17 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
   // pierdan entre sesiones.
   const [genOpts, setGenOpts] = useState(() => {
     try {
-      // Default recomendado: Portrait high × 4 variantes.
-      //   - Portrait (1024×1536): en feed/stories ocupa más pantalla que un
-      //     1:1 — mueve más el CTR que cualquier resolución extra. El 2K solo
-      //     existe en 1:1 y Meta igual comprime a ~1080px: queda para
-      //     regenerar a mano los ganadores que vivan fuera del feed.
-      //   - 4 variantes: el plan del Strategist va de réplica fiel a
-      //     creatividad libre; con 4 ya cubrís ese rango.
-      //   - high: siempre.
-      const RECOMENDADO = { n: 4, size: '1024x1536', quality: 'high', evento: '', eventoOferta: '', v: 2 };
+      // Default: 1:1 high × 4 variantes (4 cubre el rango del Strategist,
+      // de réplica fiel a creatividad libre).
+      // Ratio: SIEMPRE arranca en 1:1 (pedido del user 21/10), aunque la
+      // última tanda haya sido Portrait o 2K — el resto de las opciones sí
+      // se recuerdan.
+      const RECOMENDADO = { n: 4, size: '1024x1024', quality: 'high', evento: '', eventoOferta: '', v: 2 };
       const raw = localStorage.getItem('adslab-marketing-gen-opts');
       const parsed = raw ? JSON.parse(raw) : null;
-      // MIGRACIÓN v2 (one-shot): pisa lo persistido con el recomendado UNA
-      // vez. El `v: 2` queda guardado, así que lo que elijas a mano después
-      // (2K para un ganador, 6 variantes, etc.) sigue persistiendo normal.
       if (!parsed || parsed.v !== 2) return RECOMENDADO;
-      return parsed;
-    } catch { return { n: 4, size: '1024x1536', quality: 'high', evento: '', eventoOferta: '', v: 2 }; }
+      return { ...parsed, size: '1024x1024' };
+    } catch { return { n: 4, size: '1024x1024', quality: 'high', evento: '', eventoOferta: '', v: 2 }; }
   });
   useEffect(() => {
     try { localStorage.setItem('adslab-marketing-gen-opts', JSON.stringify(genOpts)); } catch {}

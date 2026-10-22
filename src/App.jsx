@@ -3,9 +3,9 @@ import {
   Menu, LogOut, Home, ShoppingCart, Package, Users, AlertCircle, CreditCard,
   UserCheck, TrendingUp, Plus, Filter, Eye, Edit2, Trash2, Calendar, DollarSign,
   ChevronDown, ChevronRight, Search, X, Command, Check, Bell,
-  AlignJustify, LayoutGrid, LayoutGrid as LayoutGridIcon, Columns3, Sparkles, Bot, Zap, Activity, FileText, Settings, Loader2, Calculator, Copy, Save, RotateCcw, Target, Play, Inbox, BarChart3, Instagram, SlidersHorizontal, ClipboardList, AlertTriangle, Trophy, Bookmark, Film, Wallet, Gauge, Rocket,
+  AlignJustify, LayoutGrid, LayoutGrid as LayoutGridIcon, Columns3, Sparkles, Bot, Zap, Activity, FileText, Settings, Loader2, Calculator, Copy, Save, RotateCcw, Target, Play, Inbox, BarChart3, Instagram, SlidersHorizontal, ClipboardList, AlertTriangle, Trophy, Bookmark, Film, Wallet, Gauge, Rocket, Image as ImageIconKb,
 } from 'lucide-react';
-import { VioraLogo, VioraMark, AdsLabLogo, AdsLabMark } from './logo.jsx';
+import { VioraLogo, VioraMark, KombialoLogo, KombialoMark } from './logo.jsx';
 import { installDebugLog, exportDebugLog } from './debugLog.js';
 import Landing from './Landing.jsx';
 import LandingPage from './LandingPage.jsx';
@@ -605,6 +605,7 @@ const TEXT_ZOOM = { chico: 1, mediano: 1.1, grande: 1.22 };
 // y el menú lateral. Cada uno es una rampa de 11 tonos (50→950) en formato
 // "r g b" para las variables CSS --brand-*.
 const ACCENT_PRESETS = {
+  kombialo:  { label: 'Kombialo',  ramp: { 50:'236 246 255', 100:'214 236 255', 200:'176 218 255', 300:'125 196 255', 400:'56 172 253', 500:'0 159 253', 600:'38 118 245', 700:'52 69 211', 800:'40 52 166', 900:'30 38 122', 950:'18 22 70' } },
   dorado:    { label: 'Dorado',    ramp: { 50:'250 244 234', 100:'243 230 207', 200:'233 210 168', 300:'233 201 157', 400:'214 176 132', 500:'195 152 102', 600:'184 137 90', 700:'150 112 63', 800:'107 74 42', 900:'74 51 32', 950:'43 29 18' } },
   violeta:   { label: 'Violeta',   ramp: { 50:'245 243 255', 100:'237 233 254', 200:'221 214 254', 300:'196 181 253', 400:'167 139 250', 500:'139 92 246', 600:'124 58 237', 700:'109 40 217', 800:'91 33 182', 900:'76 29 149', 950:'46 16 101' } },
   indigo:    { label: 'Índigo',    ramp: { 50:'238 242 255', 100:'224 231 255', 200:'199 210 254', 300:'165 180 252', 400:'129 140 248', 500:'99 102 241', 600:'79 70 229', 700:'67 56 202', 800:'55 48 163', 900:'49 46 129', 950:'30 27 75' } },
@@ -631,11 +632,12 @@ const ACCENT_PRESETS = {
 const PLATFORMS = [
   {
     id: 'marketing',
-    name: 'AdsLab',
-    shortName: 'AdsLab',
-    initials: 'AL',
-    sidebarGradient: 'from-purple-900 via-purple-700 to-violet-800',
-    badgeBg: 'bg-gradient-to-br from-purple-600 to-violet-500',
+    name: 'Kombialo',
+    shortName: 'Kombialo',
+    initials: 'K',
+    logo: true,
+    sidebarGradient: 'from-[#0e0e17] to-[#0a0a11]',
+    badgeBg: 'bg-gradient-to-b from-[#0a9fff] via-[#1b6aea] to-[#3a3fce]',
     badgeText: 'text-white',
     defaultSection: 'mk-home',
   },
@@ -662,7 +664,7 @@ const HIDDEN_PLATFORMS = [
 
 function getPlatform(id) {
   // Si por algún motivo (localStorage viejo) el user tiene una plataforma
-  // oculta en su preferencia, devolvemos AdsLab (marketing).
+  // oculta en su preferencia, devolvemos Kombialo (marketing).
   return PLATFORMS.find(p => p.id === id)
     || HIDDEN_PLATFORMS.find(p => p.id === id)
     || PLATFORMS[0];
@@ -694,14 +696,18 @@ function PlatformSwitcher({ currentPlatform, onSwitch, sidebarOpen }) {
         className={`w-full flex items-center gap-2 px-2 py-2 rounded-lg hover:bg-white/10 transition-colors ${!sidebarOpen ? 'justify-center' : ''}`}
         title={!sidebarOpen ? platform.name : 'Cambiar de plataforma'}
       >
-        <div className={`shrink-0 w-9 h-9 rounded-lg ${platform.badgeBg} ${platform.badgeText} flex items-center justify-center font-bold text-xs shadow-md`}>
-          {platform.initials}
-        </div>
+        {platform.logo ? (
+          <KombialoMark size={38} style={{ borderRadius: 10 }} />
+        ) : (
+          <div className={`shrink-0 w-9 h-9 rounded-lg ${platform.badgeBg} ${platform.badgeText} flex items-center justify-center font-bold text-xs shadow-md`}>
+            {platform.initials}
+          </div>
+        )}
         {sidebarOpen && (
           <>
             <div className="flex-1 min-w-0 text-left">
-              <div className="text-[10px] font-semibold text-white/50 uppercase tracking-wider leading-none">Plataforma</div>
-              <div className="text-sm font-bold text-white truncate leading-tight mt-0.5">{platform.shortName}</div>
+              <div className="text-[14px] font-extrabold text-white truncate leading-tight">{platform.shortName}</div>
+              <div className="text-[11px] text-[#68688a] truncate leading-tight mt-0.5">{platform.logo ? 'Panel de anuncios' : 'Plataforma'}</div>
             </div>
             <ChevronDown size={14} className={`text-white/50 transition-transform ${open ? 'rotate-180' : ''}`} />
           </>
@@ -721,9 +727,11 @@ function PlatformSwitcher({ currentPlatform, onSwitch, sidebarOpen }) {
                 onClick={() => { onSwitch(p.id); setOpen(false); }}
                 className={`w-full flex items-center gap-2 px-3 py-2 text-left transition ${isActive ? 'bg-white/5' : 'hover:bg-white/5'}`}
               >
-                <div className={`shrink-0 w-7 h-7 rounded-md ${p.badgeBg} ${p.badgeText} flex items-center justify-center font-bold text-[10px]`}>
-                  {p.initials}
-                </div>
+                {p.logo ? <KombialoMark size={28} style={{ borderRadius: 7 }} /> : (
+                  <div className={`shrink-0 w-7 h-7 rounded-md ${p.badgeBg} ${p.badgeText} flex items-center justify-center font-bold text-[10px]`}>
+                    {p.initials}
+                  </div>
+                )}
                 <span className="flex-1 text-sm font-medium text-white truncate">{p.name}</span>
                 {isActive && <Check size={14} className="text-white/60" />}
               </button>
@@ -1746,7 +1754,7 @@ function AppShell({ onExit }) {
   const dismissBgAnalysis = () => {
     setBgAnalysis(null);
   };
-  // AdsLab es SIEMPRE modo oscuro — se sacó el modo claro. Dejamos darkMode fijo
+  // Kombialo es SIEMPRE modo oscuro — se sacó el modo claro. Dejamos darkMode fijo
   // en true (muchos componentes lo reciben por prop) y el toggle como no-op para
   // no romper esas firmas; los botones de cambiar tema ya no se renderizan.
   const darkMode = true;
@@ -1821,8 +1829,9 @@ function AppShell({ onExit }) {
     };
   }, [currentPlatform]);
   useEffect(() => {
-    const effectiveAccent = activeProductAccent || accentColor;
-    const preset = ACCENT_PRESETS[effectiveAccent] || ACCENT_PRESETS.dorado;
+    // Rebrand Kombialo: la marca manda. El azul de Kombialo es fijo (antes
+    // cada user/producto elegía su color y la app quedaba violeta/dorada).
+    const preset = ACCENT_PRESETS.kombialo;
     const de = document.documentElement;
     const vars = {};
     for (const [stop, rgb] of Object.entries(preset.ramp)) {
@@ -2364,7 +2373,7 @@ function AppShell({ onExit }) {
   // estado real. Es ~50ms en máquinas modernas.
   if (!hydrated) {
     return (
-      <div className="flex h-screen items-center justify-center bg-gray-50 dark:bg-gray-900">
+      <div className="flex h-screen items-center justify-center bg-gray-50 dark:bg-gray-950">
         <div className="text-sm text-gray-500 dark:text-gray-400 flex items-center gap-2">
           <Loader2 size={16} className="animate-spin" />
           Cargando datos…
@@ -2374,7 +2383,7 @@ function AppShell({ onExit }) {
   }
 
   return (
-    <div className="flex h-screen bg-gray-50 dark:bg-gray-900">
+    <div className="flex h-screen bg-gray-50 dark:bg-gray-950">
       {/* Backdrop oscuro detrás del sidebar mobile */}
       {mobileMenuOpen && (
         <div
@@ -2384,7 +2393,7 @@ function AppShell({ onExit }) {
         />
       )}
       {/* Sidebar — desktop: lateral fijo. Mobile: overlay deslizante.
-          En Marketing/AdsLab usamos el MISMO bg que el main wrapper para
+          En Marketing/Kombialo usamos el MISMO bg que el main wrapper para
           que se sienta una sola superficie (pedido user: "el menu esta
           raro" cuando contrastaba con violet). Border-r sutil para delinear.
           Las otras plataformas mantienen su identidad propia. */}
@@ -2392,7 +2401,7 @@ function AppShell({ onExit }) {
         className={`
         ${effectiveSidebarOpen ? 'w-64' : 'w-20'}
         relative ${currentPlatform === 'marketing'
-          ? 'bg-gray-50 dark:bg-gray-900 text-gray-700 dark:text-gray-100 border-r border-gray-200 dark:border-gray-800'
+          ? 'bg-gray-50 dark:bg-[linear-gradient(180deg,#0e0e17,#0a0a11)] text-gray-700 dark:text-gray-100 border-r border-gray-200 dark:border-[rgba(160,160,220,0.1)]'
           : `bg-gradient-to-b ${getPlatform(currentPlatform).sidebarGradient} text-white shadow-2xl`}
         transition-all duration-500 ease-out flex flex-col
         max-md:fixed max-md:inset-y-0 max-md:left-0 max-md:z-50 max-md:w-72
@@ -2402,7 +2411,7 @@ function AppShell({ onExit }) {
         {/* Patrón decorativo sutil */}
         <div
           aria-hidden="true"
-          className="pointer-events-none absolute inset-0 opacity-[0.07] [background-image:radial-gradient(circle_at_1px_1px,_white_1px,_transparent_0)] [background-size:16px_16px]"
+          className="hidden pointer-events-none absolute inset-0 opacity-[0.07] [background-image:radial-gradient(circle_at_1px_1px,_white_1px,_transparent_0)] [background-size:16px_16px]"
         />
 
         {/* Botón de colapsar: flota en el borde derecho del sidebar, anclado
@@ -2410,7 +2419,7 @@ function AppShell({ onExit }) {
             z-50 > z-30 del header para estar siempre visible. */}
         <button
           onClick={() => setSidebarOpen(!sidebarOpen)}
-          className="absolute -right-3 top-[90px] z-50 w-6 h-6 rounded-full bg-pink-900 border border-pink-700 text-white hover:bg-pink-800 hover:scale-110 transition-all duration-200 flex items-center justify-center shadow-lg opacity-70 hover:opacity-100"
+          className="absolute -right-3 top-[90px] z-50 w-6 h-6 rounded-full bg-[#17172a] border border-[rgba(130,180,255,0.22)] text-white hover:bg-brand-700 hover:scale-110 transition-all duration-200 flex items-center justify-center shadow-lg opacity-70 hover:opacity-100"
           aria-label={sidebarOpen ? 'Colapsar sidebar' : 'Expandir sidebar'}
           title={sidebarOpen ? 'Colapsar' : 'Expandir'}
         >
@@ -2480,44 +2489,38 @@ function AppShell({ onExit }) {
               {/* Cuenta por área (miembro): solo ve las secciones de SUS áreas. */}
               {/* Orden del menú a gusto del user (captura 14/10): Publicador
                   arriba en Operación y Meta Ads como entrada propia. */}
-              <NavSection title="Operación" sectionKey="mk-op" sidebarOpen={sidebarOpen}>
-                <NavItem icon={LayoutGridIcon} label="Home" section="mk-home" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
-                {/* Meta Ads salió del menú: es la pestaña "Cuentas de Meta" adentro de Métricas. */}
-                {(!currentUser.miembro || currentUser.miembro.areas.includes('metricas')) && (
-                  <NavItem icon={Gauge} label="Métricas" section="mk-metricas" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
-                )}
-                {(!currentUser.miembro || currentUser.miembro.areas.includes('produccion')) && (
-                  <NavItem icon={Rocket} label="Publicador" section="mk-publicar" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
-                )}
-              </NavSection>
+              {/* Menú con la estructura de Kombialo: ítems sueltos arriba y
+                  grupos (ícono + flecha) con sus secciones colgando de una
+                  línea. Suscripción clavada abajo de todo. */}
+              <NavItem icon={LayoutGridIcon} label="Inicio" section="mk-home" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
+              {/* Meta Ads salió del menú: es la pestaña "Cuentas de Meta" adentro de Métricas. */}
+              {(!currentUser.miembro || currentUser.miembro.areas.includes('metricas')) && (
+                <NavItem icon={Gauge} label="Métricas" section="mk-metricas" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
+              )}
+              {(!currentUser.miembro || currentUser.miembro.areas.includes('produccion')) && (
+                <NavItem icon={Rocket} label="Publicador" section="mk-publicar" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
+              )}
               {(!currentUser.miembro || currentUser.miembro.areas.includes('productos')) && (
-                <NavSection title="Creación de estáticos" sectionKey="mk-estaticos" sidebarOpen={sidebarOpen}>
-                  <NavItem icon={Play} label="Productos" section="mk-arranque" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
-                  {/* "Winners" (galería vieja de estáticos) y "Copy AI" salieron del
-                      menú (14/10, no se usaban — los winners REALES viven en
-                      Métricas y Producción). Las secciones siguen existiendo por
-                      URL/estado viejo; si el tracking de uso confirma cero visitas,
-                      se borra el código entero. */}
+                <NavSection title="Estáticos" icon={ImageIconKb} sectionKey="mk-estaticos" sidebarOpen={sidebarOpen}>
+                  <NavItem sub icon={Play} label="Productos" section="mk-arranque" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
                 </NavSection>
               )}
               {(!currentUser.miembro || currentUser.miembro.areas.some(a => a === 'produccion' || a === 'landings')) && (
-                <NavSection title="Área creativa" sectionKey="mk-creativa" sidebarOpen={sidebarOpen}>
+                <NavSection title="Área creativa" icon={Film} sectionKey="mk-creativa" sidebarOpen={sidebarOpen}>
                   {/* El Resumen (CreativaDashboard) vive embebido en el Home. */}
                   {(!currentUser.miembro || currentUser.miembro.areas.includes('produccion')) && (
-                    <NavItem icon={Film} label="Producción" section="mk-produccion" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
+                    <NavItem sub icon={Film} label="Producción" section="mk-produccion" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
                   )}
                   {(!currentUser.miembro || currentUser.miembro.areas.includes('landings')) && (
-                    <NavItem icon={ClipboardList} label="Landings" section="mk-landings" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
+                    <NavItem sub icon={ClipboardList} label="Landings" section="mk-landings" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
                   )}
                 </NavSection>
               )}
-              {/* Plan y facturación: solo el dueño (no miembros), clavado ABAJO
-                  de todo el menú (!mt-auto gana al space-y del nav). */}
+              {/* Suscripción: solo el dueño (no miembros), clavada ABAJO de
+                  todo el menú (!mt-auto gana al space-y del nav). */}
               {!currentUser.miembro && (
                 <div className="!mt-auto pt-4">
-                  <NavSection title="Cuenta" sectionKey="mk-cuenta" sidebarOpen={sidebarOpen} defaultOpen={false}>
-                    <NavItem icon={CreditCard} label="Plan y facturación" section="mk-plan" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
-                  </NavSection>
+                  <NavItem icon={CreditCard} label="Suscripción" section="mk-plan" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
                 </div>
               )}
               {/* "Finanzas → Gastos del stack" salió del menú (pedido del user):
@@ -2565,14 +2568,13 @@ function AppShell({ onExit }) {
       </aside>
 
       {/* Main Content
-          - pb-32 deja espacio abajo para que las barras flotantes fixed (bulk
-            actions de Bandeja/Galería/Inspiración, ExecutionsTray bottom-right,
-            BulkProgressBar bottom-center) NO tapen los últimos 100-120px del
-            contenido scrollable. Sin esto el user no podía llegar al final.
+          - pb-6: el pie quedaba con ~160px vacíos en TODAS las pantallas (pedido
+            del user: el scroll terminaba muy abajo). Las barras flotantes de
+            acciones masivas aparecen solo con selección y se pueden cerrar.
           - scroll-pt-20 compensa los ~80px del StickyHeader sticky en
             smooth-scroll y anchor-jumps para que el anchor no quede tapado.
-          - scroll-pb-32 simétrico para anchors al pie. */}
-      <main className="flex-1 overflow-auto relative pb-32 scroll-pt-20 scroll-pb-32 app-mesh-bg">
+          - scroll-pb-16 para anchors al pie. */}
+      <main className="flex-1 overflow-auto relative pb-6 scroll-pt-20 scroll-pb-16 app-mesh-bg">
         {/* Pill flotante del análisis en bg: visible desde cualquier sección
             cuando hay un análisis en curso. Click "Ver" → te lleva a Marketing. */}
         {bgAnalysis && (
@@ -2616,7 +2618,7 @@ function AppShell({ onExit }) {
           {/* Gate doble de Supabase removido — ahora la auth Supabase es la
               ÚNICA puerta global (ver checkpoint arriba). Si llegamos acá,
               ya hay supabaseUser. */}
-          {currentUser.role === 'admin' && currentPlatform === 'marketing' && (supabaseUser || !supabase) && currentSection === 'mk-home' && <HomeOS onNavigate={(s) => setCurrentSection(s)} addToast={addToast} />}
+          {currentUser.role === 'admin' && currentPlatform === 'marketing' && (supabaseUser || !supabase) && currentSection === 'mk-home' && <HomeOS nombre={currentUser.name} onNavigate={(s) => setCurrentSection(s)} addToast={addToast} />}
           {currentUser.role === 'admin' && currentPlatform === 'marketing' && (supabaseUser || !supabase) && currentSection === 'mk-copy' && <CopyGeneratorSection addToast={addToast} />}
           {currentUser.role === 'admin' && currentPlatform === 'marketing' && (supabaseUser || !supabase) && currentSection === 'mk-arranque' && <ArranqueSection addToast={addToast} onGoToSection={setCurrentSection} />}
           {currentUser.role === 'admin' && currentPlatform === 'marketing' && (supabaseUser || !supabase) && currentSection === 'mk-bandeja' && <BandejaSection addToast={addToast} />}
@@ -2653,9 +2655,9 @@ function AppShell({ onExit }) {
         </div>
       </main>
 
-      {/* Copiloto proactivo — botón flotante con sugerencias contextuales
-          basadas en heurísticas del state local. Solo en marketing platform. */}
-      {currentPlatform === 'marketing' && (
+      {/* Copiloto proactivo — botón flotante sacado de la vista (pedido del
+          user 17/10). El componente queda por si se quiere volver a montar. */}
+      {false && currentPlatform === 'marketing' && (
         <ClaudeProactivoSidebar
           onNavigate={(section, productoId) => {
             if (productoId) {
@@ -2828,7 +2830,7 @@ function SidebarStats({ sidebarOpen, onNavGastos }) {
 // Agrupador colapsable de NavItems estilo Apify sidebar — título con
 // chevron, recordamos estado abierto/cerrado en localStorage. En modo
 // colapsado del sidebar mostramos solo un divisor sutil entre grupos.
-function NavSection({ title, sectionKey, sidebarOpen, defaultOpen = true, children }) {
+function NavSection({ title, sectionKey, sidebarOpen, defaultOpen = true, icon: Icon, children }) {
   const [open, setOpen] = useState(() => {
     try {
       const v = localStorage.getItem(`adslab-navsec-${sectionKey}`);
@@ -2842,6 +2844,27 @@ function NavSection({ title, sectionKey, sidebarOpen, defaultOpen = true, childr
       return next;
     });
   };
+  // Grupo estilo Kombialo: el grupo es un ítem más (ícono + nombre + flecha)
+  // y sus secciones cuelgan de una línea vertical, sin ícono. Plegado, los
+  // hijos se muestran como íconos sueltos.
+  if (Icon) {
+    if (!sidebarOpen) return <div className="space-y-1">{children}</div>;
+    return (
+      <div>
+        <button
+          onClick={toggle}
+          className="w-full flex items-center gap-[11px] px-3 py-2.5 rounded-[10px] text-[14px] font-semibold text-[#9c9cb8] hover:text-white hover:bg-[#1a1a2a] transition-colors duration-150"
+        >
+          <Icon size={19} className="shrink-0" />
+          <span className="flex-1 truncate text-left" title={title}>{title}</span>
+          <ChevronDown size={14} className={`shrink-0 opacity-60 transition-transform duration-150 ${open ? 'rotate-180' : ''}`} />
+        </button>
+        <div className={`ml-[21px] pl-2.5 border-l border-[rgba(160,160,220,0.12)] space-y-px overflow-hidden transition-all duration-200 ${open ? 'max-h-screen opacity-100 mt-0.5 mb-1.5' : 'max-h-0 opacity-0'}`}>
+          {children}
+        </div>
+      </div>
+    );
+  }
   if (!sidebarOpen) {
     return <div aria-hidden="true" className="my-2 mx-3 h-px bg-white/10" />;
   }
@@ -2851,7 +2874,6 @@ function NavSection({ title, sectionKey, sidebarOpen, defaultOpen = true, childr
           texto pero grande y protagonista, no la etiquetita uppercase. */}
       <button
         onClick={toggle}
-        style={{ fontFamily: "'Sora', Inter, system-ui, sans-serif" }}
         className="flex items-center gap-1.5 px-4 mb-1 text-[14.5px] font-extrabold tracking-tight text-white/90 hover:text-white transition w-full"
       >
         <ChevronDown size={13} className={`shrink-0 transition-transform duration-200 ${open ? '' : '-rotate-90'}`} />
@@ -2865,28 +2887,42 @@ function NavSection({ title, sectionKey, sidebarOpen, defaultOpen = true, childr
   );
 }
 
-function NavItem({ icon: Icon, label, section, currentSection, onSelect, sidebarOpen }) {
+function NavItem({ icon: Icon, label, section, currentSection, onSelect, sidebarOpen, sub = false }) {
   const isActive = currentSection === section;
+  // Sub-sección de un grupo (estilo Kombialo): sin ícono, 13px, la elegida en
+  // celeste. Con la barra plegada vuelve a ser un ítem con ícono.
+  if (sub && sidebarOpen) {
+    return (
+      <button
+        onClick={() => onSelect(section)}
+        className={`w-full text-left px-2.5 py-[7px] rounded-lg text-[13px] font-semibold transition-colors duration-150 ${
+          isActive ? 'text-brand-400 bg-brand-500/10' : 'text-[#9c9cb8] hover:text-white hover:bg-[#1a1a2a]'
+        }`}
+      >
+        {label}
+      </button>
+    );
+  }
   return (
     <button
       onClick={() => onSelect(section)}
       title={!sidebarOpen ? label : undefined}
-      className={`group relative w-full flex items-center gap-2.5 px-3 py-2 rounded-lg transition-colors duration-200 ${
+      className={`group relative w-full flex items-center gap-[11px] px-3 py-2.5 rounded-[10px] transition-colors duration-150 ${
         isActive
-          ? 'bg-gradient-to-r from-violet-600/85 to-sky-500/55 text-white shadow-[0_4px_14px_rgba(124,58,237,.35)]'
-          : 'text-slate-200/75 hover:text-white hover:bg-white/5'
+          ? 'bg-[#1a1a2a] text-white'
+          : 'text-[#9c9cb8] hover:text-white hover:bg-[#1a1a2a]'
       }`}
     >
       {/* Indicador lateral sutil sobre el activo (misma geometría que el resto:
           el activo se distingue por color, no por tamaño). */}
       <span
         aria-hidden="true"
-        className={`absolute left-0 top-1/2 -translate-y-1/2 w-0.5 rounded-r-full bg-white/80 transition-all duration-300 ${
+        className={`absolute left-0 top-1/2 -translate-y-1/2 w-0.5 rounded-r-full bg-brand-500 transition-all duration-300 ${
           isActive ? 'h-4 opacity-100' : 'h-0 opacity-0'
         }`}
       />
-      <Icon size={17} className="shrink-0" />
-      {sidebarOpen && <span style={{ fontFamily: "'Sora', Inter, system-ui, sans-serif" }} className={`text-[13.5px] whitespace-nowrap ${isActive ? 'font-bold' : 'font-semibold'}`}>{label}</span>}
+      <Icon size={19} className="shrink-0" />
+      {sidebarOpen && <span className="text-[14px] whitespace-nowrap font-semibold">{label}</span>}
       {/* Tooltip en modo colapsado */}
       {!sidebarOpen && (
         <span className="pointer-events-none absolute left-full ml-3 px-2 py-1 rounded-md text-xs font-semibold whitespace-nowrap bg-gray-900 text-white opacity-0 group-hover:opacity-100 translate-x-[-6px] group-hover:translate-x-0 transition-all duration-150 z-50 shadow-lg">
@@ -2977,10 +3013,10 @@ function LoginScreen({ onLogin, onSessionAuth, darkMode, toggleDarkMode }) {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-pink-50 to-rose-50 dark:from-gray-900 dark:to-gray-800 flex items-center justify-center p-4 relative">
+    <div className="min-h-screen bg-gray-50 dark:bg-gray-950 dark:bg-[radial-gradient(1200px_700px_at_80%_-10%,#14264a_0%,#0a0a12_55%)] flex items-center justify-center p-4 relative">
       <div className="w-full max-w-md bg-white dark:bg-gray-800 rounded-2xl shadow-2xl p-8">
         <div className="text-center mb-8 flex flex-col items-center">
-          <AdsLabLogo size="md" variant={darkMode ? 'light' : 'default'} />
+          <KombialoLogo size="md" variant={darkMode ? 'light' : 'default'} />
           <p className="text-gray-600 dark:text-gray-400 mt-1 text-xs tracking-widest uppercase">Panel de gestión</p>
         </div>
 
@@ -3017,7 +3053,7 @@ function LoginScreen({ onLogin, onSessionAuth, darkMode, toggleDarkMode }) {
             <button
               onClick={doLogin}
               disabled={loggingIn}
-              className="w-full py-2.5 mt-2 bg-gradient-to-r from-pink-900 to-rose-700 text-white rounded-lg hover:shadow-lg transition font-semibold disabled:opacity-60"
+              className="w-full py-2.5 mt-2 bg-gradient-to-b from-brand-500 to-brand-700 text-white rounded-[10px] shadow-[0_10px_24px_-10px_rgba(38,118,245,.5)] hover:brightness-110 transition font-semibold disabled:opacity-60"
             >
               {loggingIn ? 'Ingresando…' : 'Ingresar'}
             </button>
@@ -8519,7 +8555,7 @@ function getSectionTitle(user, section) {
     resumen: 'Mi Balance',
     'mis-clientes': 'Mis Clientes',
   };
-  return (user?.role === 'admin' ? admin[section] : mentor[section]) || 'AdsLab';
+  return (user?.role === 'admin' ? admin[section] : mentor[section]) || 'Kombialo';
 }
 
 // Header sticky que agrega blur + border al hacer scroll. Incluye el botón
@@ -8861,20 +8897,6 @@ function AppearanceMenu({ textSize, setTextSize, uiFont, setUiFont, accentColor,
             </div>
           </div>
 
-          <div>
-            <p className="text-[11px] font-semibold text-gray-600 dark:text-gray-300 mb-1">Color de acento <span className="text-gray-400 font-normal">(toda la app)</span></p>
-            <div className="grid grid-cols-4 gap-1.5">
-              {Object.entries(ACCENT_PRESETS).map(([k, p]) => (
-                <button key={k} onClick={() => setAccentColor(k)} title={p.label}
-                  className={`h-8 rounded-md border-2 flex items-center justify-center transition ${
-                    accentColor === k ? 'border-gray-900 dark:border-white scale-105' : 'border-transparent hover:scale-105'
-                  }`}
-                  style={{ background: `linear-gradient(135deg, rgb(${p.ramp[400]}), rgb(${p.ramp[600]}))` }}>
-                  {accentColor === k && <Check size={13} className="text-white" style={{ filter: 'drop-shadow(0 1px 1px rgba(0,0,0,0.7))' }} />}
-                </button>
-              ))}
-            </div>
-          </div>
         </div>
       )}
     </div>
@@ -8923,7 +8945,7 @@ function StickyHeader({ title, subtitle, darkMode, toggleDarkMode, textSize, set
       </div>
       <div className="flex items-center gap-2 shrink-0">
         {/* Conectar cuenta publicitaria de Meta — accesible desde cualquier
-            sección de AdsLab, no solo desde Meta Ads → Campañas. */}
+            sección de Kombialo, no solo desde Meta Ads → Campañas. */}
         {showMetaConnect && <MetaConnectButton addToast={addToast} />}
         <SyncStatusBadge />
         <ActivityBell />
@@ -9041,7 +9063,7 @@ export default function App() {
     try {
       const tag = typeof __VIORA_BUILD__ !== 'undefined' ? __VIORA_BUILD__ : 'unknown';
       // eslint-disable-next-line no-console
-      console.info(`%c[AdsLab build] ${tag}`, 'color: #c026d3; font-weight: bold');
+      console.info(`%c[Kombialo build] ${tag}`, 'color: #009ffd; font-weight: bold');
       window.__VIORA_BUILD__ = tag;
     } catch {}
     // Instalar el debug log global — captura fetch, errores, rejections y

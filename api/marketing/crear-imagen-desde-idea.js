@@ -523,9 +523,10 @@ export default async function handler(req, res) {
           // metadata acá SÍ corresponde a la imagen i tras fallos parciales.
           const variantStyle = genItems[i]?.style || 'tight';
           try {
-            const { storagePath, imageUrl } = await uploadCreativoToBucket(userId, refId, b64);
+            const { storagePath, imageUrl, thumbPath } = await uploadCreativoToBucket(userId, refId, b64);
             const row = await insertCreativoRow({
               id: refId,
+              thumb_path: thumbPath || null,
               user_id: userId,
               producto_id: productoId,
               source_ad_id: sourceIdeaId,

@@ -100,6 +100,13 @@ export const CFG_DEFAULT = {
   // si el pixel no reporta InitiateCheckout, esa condición da "malo" siempre y
   // ensucia la ronda entera. Editable desde la UI.
   condicionesPausar: ['piso', 'roas', 'atc', 'checkout'],
+  // Testeos: una campaña recién lanzada que viene mal no es (todavía) una
+  // campaña mala — está madurando. Con esto activo, lo que tiene menos de
+  // diasMinPausar días de creado NO se marca "pausar": se marca "testeo"
+  // (aviso, sin contar en la plata en juego). Destildalo si preferís que
+  // todo lo que viene mal salte igual, tenga la edad que tenga.
+  respetarTesteos: true,
+  diasMinPausar: 2,
   // Oportunidad de escala: ROAS este % por ENCIMA del corte (1.3 = 30%), hoy
   // y sostenido en la ventana reciente, marca la campaña como candidata a
   // subir presupuesto. Con corte 1.6 → objetivo 2.08.
@@ -314,7 +321,7 @@ export const ETAPAS = [
 ];
 
 // Qué producto es, cruzando el nombre de la campaña contra los productos que
-// ya están cargados en AdsLab.
+// ya están cargados en Kombialo.
 //
 // Dos formas de match, en este orden:
 //   1. ALIAS que cargó el equipo para ese producto ("aceit" → Aceite
@@ -739,9 +746,21 @@ export function evaluarPausa(item, promedios, cfg = CFG_DEFAULT) {
   const consumidoPct = presupuesto > 0 ? (gastoPadre / presupuesto) * 100 : null;
   const yaQuemado = consumidoPct != null && consumidoPct >= (cfg.consumoAltoPct || 100);
 
+  // Edad del ítem (días desde que se creó en Meta). Una campaña de menos de
+  // diasMinPausar días es un TESTEO madurando: si respetarTesteos está activo
+  // y le tocaba 'pausar', se degrada a 'testeo' (aviso visible, pero fuera de
+  // la tanda y de la plata en juego).
+  const edadDias = item?.createdTime
+    ? (Date.now() - new Date(item.createdTime).getTime()) / 86400000
+    : null;
+  const esTesteoJoven = (cfg.respetarTesteos ?? true)
+    && edadDias != null && edadDias < (cfg.diasMinPausar ?? 2);
+
   return {
     candidato,
     condiciones,
+    edadDias,
+    esTesteoJoven,
     costoATC,
     costoCheckout,
     umbralATC,
@@ -767,14 +786,17 @@ export function evaluarPausa(item, promedios, cfg = CFG_DEFAULT) {
     // gastó, dejalo morir".
     accion: !candidato ? null
       : !costosCaros ? 'dejar-correr'
-        : yaQuemado ? 'dejar-correr' : 'pausar',
+        : yaQuemado ? 'dejar-correr'
+          : esTesteoJoven ? 'testeo' : 'pausar',
     motivoAccion: !candidato
       ? null
       : !costosCaros
         ? 'ROAS bajo el corte, pero el costo por carrito y por pago iniciado están dentro del promedio de la cuenta: el embudo está sano y la venta puede caer más tarde — dejalo correr'
         : yaQuemado
           ? `ya consumió el ${Math.round(consumidoPct)}% del presupuesto: pausarlo no ahorra casi nada`
-          : restante != null
+          : esTesteoJoven
+            ? `viene mal, pero se creó hace ${edadDias < 1 ? 'unas horas' : `${Math.floor(edadDias)} día${Math.floor(edadDias) === 1 ? '' : 's'}`} — es un testeo madurando (el corte es ${cfg.diasMinPausar ?? 2} días; se puede destildar en los criterios)`
+            : restante != null
             ? (compartido
               ? `de acá a fin del día se llevaría ${Math.round(restante)} del presupuesto de la campaña — pausarlo no lo ahorra, lo manda a los otros anuncios`
               : `le quedan ${Math.round(restante)} por gastar hoy`)

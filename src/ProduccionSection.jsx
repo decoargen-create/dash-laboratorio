@@ -17,7 +17,7 @@ import {
 } from 'lucide-react';
 import {
   ESTADOS, ESTADO_LABELS, VIDEOS_POR_PRODUCTO, weekKeyOf, weekLabel, allWeekKeys,
-  listAssignments, listAllAssignments, addAssignment, updateAssignment, aprobarTodosVideos, removeAssignment,
+  listAssignments, listAllAssignments, addAssignment, updateAssignment, compararOrden, aprobarTodosVideos, removeAssignment,
   assignCreator, subscribeProduccion, esCompleto, bonusObjetivo, bonusDe, inversionPorProducto,
   getRole, entregasNuevas, ultimaSubidaTs, personasEnTarjetas, resumenVideosPorProducto,
   resyncDesdeNube, vaciarTodo, setMaterialLinkProducto, probarDiscord,
@@ -90,7 +90,7 @@ function setVistasTs(ts) {
 
 // Aviso del admin: entregas (videos que subió el equipo) que TODAVÍA NO MIRÓ.
 // En vez de revisar tarjeta por tarjeta buscando qué cambió, ve de una lo nuevo,
-// con "Ver" (abre la tarjeta para mirar/descargar de Drive o AdsLab) y "Marcar
+// con "Ver" (abre la tarjeta para mirar/descargar de Drive o Kombialo) y "Marcar
 // visto". Cuando llega algo nuevo con la app abierta dispara un toast, y una
 // notificación del navegador si el admin activó los avisos (🔔). El "visto" es
 // una marca local por dispositivo (localStorage) — no toca la nube.
@@ -114,7 +114,7 @@ function NovedadesPanel({ onOpen, addToast }) {
       addToast?.({ type: 'info', message: `🆕 ${totalNuevos} entrega${totalNuevos === 1 ? '' : 's'} nueva${totalNuevos === 1 ? '' : 's'} del equipo` });
       if (notifOn && typeof Notification !== 'undefined' && Notification.permission === 'granted') {
         try {
-          new Notification('AdsLab — entregas nuevas', {
+          new Notification('Kombialo — entregas nuevas', {
             body: `${totalNuevos} video${totalNuevos === 1 ? '' : 's'} nuevo${totalNuevos === 1 ? '' : 's'} del equipo. Entrá a Producción para verlos.`,
             tag: 'adslab-entregas',
           });
@@ -219,7 +219,7 @@ function NovedadesPanel({ onOpen, addToast }) {
             <p className="px-4 py-1.5 text-[10px] text-gray-400 dark:text-gray-500">y {resto} tarjeta{resto === 1 ? '' : 's'} más con entregas nuevas…</p>
           )}
           <div className="flex items-center gap-2 px-4 py-2 bg-gray-50 dark:bg-gray-900/40">
-            <span className="text-[10px] text-gray-400 dark:text-gray-500 flex-1">Abrí una tarjeta para mirar o descargar los videos (Drive o AdsLab).</span>
+            <span className="text-[10px] text-gray-400 dark:text-gray-500 flex-1">Abrí una tarjeta para mirar o descargar los videos (Drive o Kombialo).</span>
             {!notifOn ? (
               <button onClick={activarAvisos} className="inline-flex items-center gap-1 text-[11px] font-semibold text-brand-600 dark:text-brand-300 hover:underline">
                 <Bell size={12} /> Activar avisos
@@ -773,7 +773,8 @@ export default function ProduccionSection({ addToast }) {
     for (const a of asigsBoard) (m[columnaEfectiva(a, now)] || m.porhacer).push(a);
     // Orden por PRIORIDAD dentro de cada columna (1 alta primero, sin prioridad
     // al final) — "vamos a ir ordenando por prioridades" (reunión 12/10).
-    for (const k of Object.keys(m)) m[k].sort((a, b) => (a.prioridad ?? 99) - (b.prioridad ?? 99));
+    // + orden MANUAL arrastrando una tarjeta sobre otra (pedido 19/10).
+    for (const k of Object.keys(m)) m[k].sort(compararOrden);
     return m;
   }, [asigsBoard]);
   // Resumen del header: "en producción" = tarjetas activas (sin las archivadas),
@@ -798,18 +799,17 @@ export default function ProduccionSection({ addToast }) {
   // la semana, cada tarjeta lleva #1, #2… (igual que en el tablero del editor).
   const numMap = useMemo(() => numerarDuplicados(asigs), [asigs]);
 
-  const onDrop = (e, colKey) => {
-    e.preventDefault();
-    setDragOver(null);
-    const id = e.dataTransfer.getData('text/prod-id');
-    if (!id) return;
+  // Cambia de columna respetando las reglas. Devuelve false si no se pudo.
+  const moverA = (id, colKey) => {
+    const actual = asigs.find(a => a.id === id);
+    if (actual && columnaEfectiva(actual, Date.now()) === colKey) return true;
     // Solo se archiva lo ya publicado/aprobado (sino una tarjeta sin terminar
     // contaría como completa para el pago). El auto-archivo de 48h ya respeta esto.
     if (colKey === 'archivado') {
       const card = asigs.find(a => a.id === id);
       if (card && card.estado !== 'publicado' && card.estado !== 'aprobado') {
         addToast?.({ type: 'warning', message: 'Solo se archiva lo que ya está publicado o aprobado.' });
-        return;
+        return false;
       }
     }
     // Regla: no se pasa a "En revisión" hasta subir los N videos.
@@ -818,10 +818,36 @@ export default function ProduccionSection({ addToast }) {
       const objetivo = card?.videosTotal || VIDEOS_POR_PRODUCTO;
       if (card && (card.archivos?.length || 0) < objetivo) {
         addToast?.({ type: 'warning', message: `Faltan videos: subí los ${objetivo} para pasar a revisión.` });
-        return;
+        return false;
       }
     }
     updateAssignment(id, { estado: colKey });
+    return true;
+  };
+  const onDrop = (e, colKey) => {
+    e.preventDefault();
+    setDragOver(null); setDropAntes(null);
+    const id = e.dataTransfer.getData('text/prod-id');
+    if (id) moverA(id, colKey);
+  };
+  // Soltar SOBRE una tarjeta: queda arriba o abajo de esa (según la mitad
+  // donde se suelta) y se renumera el orden de toda la columna.
+  const [dropAntes, setDropAntes] = useState(null); // { id, antes }
+  const onDropEnTarjeta = (e, colKey, destino) => {
+    e.preventDefault(); e.stopPropagation();
+    const pos = dropAntes; setDragOver(null); setDropAntes(null);
+    const id = e.dataTransfer.getData('text/prod-id');
+    if (!id || id === destino.id) return;
+    if (!moverA(id, colKey)) return;
+    const lista = (byCol[colKey] || []).filter(x => x.id !== id).map(x => x.id);
+    let idx = lista.indexOf(destino.id);
+    if (idx < 0) idx = lista.length;
+    if (!(pos?.id === destino.id && pos.antes)) idx += 1;
+    lista.splice(idx, 0, id);
+    lista.forEach((cid, i) => {
+      const card = asigs.find(x => x.id === cid);
+      if (card && card.orden !== i + 1) updateAssignment(cid, { orden: i + 1 });
+    });
   };
 
   return (
@@ -1159,7 +1185,7 @@ export default function ProduccionSection({ addToast }) {
           return (
             <div key={col.key}
               onDragOver={e => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; setDragOver(col.key); }}
-              onDragLeave={() => setDragOver(d => d === col.key ? null : d)}
+              onDragLeave={e => { if (!e.currentTarget.contains(e.relatedTarget)) { setDragOver(d => d === col.key ? null : d); setDropAntes(null); } }}
               onDrop={e => onDrop(e, col.key)}
               className={`${col.key === mobileTabOk ? 'flex' : 'hidden'} lg:flex flex-col flex-1 lg:min-w-0 rounded-xl p-2.5 transition ${dragOver === col.key ? 'bg-brand-50 dark:bg-brand-900/20 ring-2 ring-brand-300 dark:ring-brand-700' : 'bg-gray-50 dark:bg-gray-800/40'}`}>
               {/* Cabecera tintada con el color del estado: se reconoce por zona */}
@@ -1172,9 +1198,22 @@ export default function ProduccionSection({ addToast }) {
                   scrollea DENTRO de la columna (no empuja toda la página). */}
               <div className="flex flex-col gap-2 flex-1 min-h-[60px] pt-2 lg:overflow-y-auto">
                 {cards.map(a => (
-                  <TarjetaProduccion key={a.id} a={a} num={numMap[a.id]} personas={personas} team={team} addToast={addToast}
-                    caps={CAPS_ADMIN}
-                    onOpen={() => setDetailId(a.id)} />
+                  <div key={a.id} className="relative"
+                    onDragOver={e => {
+                      e.preventDefault(); e.stopPropagation(); e.dataTransfer.dropEffect = 'move';
+                      const r = e.currentTarget.getBoundingClientRect();
+                      const antes = e.clientY < r.top + r.height / 2;
+                      setDragOver(col.key);
+                      setDropAntes(p => (p?.id === a.id && p.antes === antes) ? p : { id: a.id, antes });
+                    }}
+                    onDrop={e => onDropEnTarjeta(e, col.key, a)}>
+                    {dropAntes?.id === a.id && (
+                      <span className={`absolute left-1 right-1 h-1 rounded-full bg-brand-500 z-10 ${dropAntes.antes ? '-top-1.5' : '-bottom-1.5'}`} />
+                    )}
+                    <TarjetaProduccion a={a} num={numMap[a.id]} personas={personas} team={team} addToast={addToast}
+                      caps={CAPS_ADMIN}
+                      onOpen={() => setDetailId(a.id)} />
+                  </div>
                 ))}
                 {cards.length === 0 && (
                   <div className="m-auto text-center text-xs text-gray-300 dark:text-gray-600 py-4 select-none">
@@ -2165,7 +2204,7 @@ function VideoSearchModal({ onClose, addToast }) {
                     )}
                   </>
                 ) : (
-                  <span className="text-[10px] font-bold text-gray-400 bg-gray-100 dark:bg-gray-700 rounded-full px-2 py-1">AdsLab</span>
+                  <span className="text-[10px] font-bold text-gray-400 bg-gray-100 dark:bg-gray-700 rounded-full px-2 py-1">Kombialo</span>
                 )}
               </div>
             </div>
@@ -2769,7 +2808,7 @@ export function CardDetailModal({ a, personas, team = [], onClose, addToast, onT
         <ConfirmDialog
           open={dlg === 'eliminar'}
           title={`¿Eliminar la tarjeta de ${a.productoNombre}?`}
-          message="Se pierde su historial y su lista de videos. Los archivos ya subidos a Drive/AdsLab no se borran."
+          message="Se pierde su historial y su lista de videos. Los archivos ya subidos a Drive/Kombialo no se borran."
           confirmLabel="Eliminar tarjeta" tone="danger"
           onConfirm={() => { setDlg(null); removeAssignment(a.id); onClose(); }}
           onClose={() => setDlg(null)}

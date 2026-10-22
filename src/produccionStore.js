@@ -57,6 +57,8 @@ let _winnersCloud = false;
 let _etiquetaCloud = false;
 // Ídem `prioridad` (migración 0039).
 let _prioridadCloud = false;
+// Ídem `orden` (migración 0044) — orden manual dentro de la columna (drag).
+let _ordenCloud = false;
 // Ídem `referencias` (migración 0036) — reels de IG de referencia para el editor.
 let _referenciasCloud = false;
 // Contador de escrituras locales. Sirve para que un hydrate/refetch NO pise un
@@ -153,6 +155,7 @@ function rowToLocal(r) {
     referencias: Array.isArray(r.referencias) ? r.referencias : [],
     etiqueta: r.etiqueta || '',
     prioridad: r.prioridad != null ? r.prioridad : null,
+    orden: r.orden != null ? r.orden : null,
     pagado: !!r.pagado,
     archivos: Array.isArray(r.archivos) ? r.archivos : [],
     historial: Array.isArray(r.historial) ? r.historial : [],
@@ -194,6 +197,7 @@ function localToRow(a) {
   if (_etiquetaCloud) row.etiqueta = a.etiqueta || null;
   // Ídem prioridad (migración 0039): 1 alta · 2 media · 3 baja · null sin.
   if (_prioridadCloud) row.prioridad = a.prioridad != null ? a.prioridad : null;
+  if (_ordenCloud) row.orden = a.orden != null ? a.orden : null;
   return row;
 }
 
@@ -368,7 +372,7 @@ const COLMAP = {
   videosTotal: 'videos_total', videosAprobados: 'videos_aprobados', brief: 'brief',
   nota: 'nota', pagado: 'pagado', archivos: 'archivos', historial: 'historial',
   materialLink: 'material_link', winners: 'winners', referencias: 'referencias',
-  etiqueta: 'etiqueta', prioridad: 'prioridad',
+  etiqueta: 'etiqueta', prioridad: 'prioridad', orden: 'orden',
 };
 
 function pushRow(id, evento = null, opts = {}) {
@@ -530,6 +534,10 @@ async function hydrate() {
       const probe = await supabase.from(TABLE).select('prioridad').limit(1);
       _prioridadCloud = !probe.error;
     } catch { _prioridadCloud = false; }
+    try {
+      const probe = await supabase.from(TABLE).select('orden').limit(1);
+      _ordenCloud = !probe.error;
+    } catch { _ordenCloud = false; }
     // Ídem `referencias` (migración 0036).
     try {
       const probe = await supabase.from(TABLE).select('referencias').limit(1);
@@ -803,6 +811,16 @@ export function weekRange(weekKey) {
   const sunday = new Date(monday); sunday.setUTCDate(monday.getUTCDate() + 6);
   const f = dt => `${dt.getUTCDate()}/${dt.getUTCMonth() + 1}`;
   return `${f(monday)} al ${f(sunday)}`;
+}
+
+// Orden de las tarjetas dentro de una columna: primero el orden MANUAL (lo
+// que se arrastró en el tablero), después la prioridad (1 alta · 3 baja) y las
+// que no tienen ninguno de los dos al final. Lo usan el tablero del admin y el
+// del editor, así los dos ven la misma fila de trabajo.
+export function compararOrden(a, b) {
+  const oa = a?.orden ?? Infinity, ob = b?.orden ?? Infinity;
+  if (oa !== ob) return oa - ob;
+  return (a?.prioridad ?? 99) - (b?.prioridad ?? 99);
 }
 
 export function listAssignments(weekKey) {
@@ -1218,7 +1236,7 @@ async function notificarEventoDiscord(a, event, from, extra = {}) {
         from: from || '',
         to: event === 'nuevo' ? '' : event,
         actor: _actorName || '',
-        // Link DIRECTO a la tarjeta en AdsLab (abre esa tarjeta puntual, no el
+        // Link DIRECTO a la tarjeta en Kombialo (abre esa tarjeta puntual, no el
         // tablero entero) → para que el editor sepa exactamente cuál es.
         cardUrl: (typeof window !== 'undefined' && a.id) ? `${window.location.origin}/?prod=${encodeURIComponent(a.id)}` : '',
         // Semana de la tarjeta, como contexto extra en el aviso.

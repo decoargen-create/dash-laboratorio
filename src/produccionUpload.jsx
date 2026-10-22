@@ -5,7 +5,7 @@
 //   1. Pide una "drive-session" al server (/api/produccion/drive-session), que
 //      arma la carpeta correcta en Drive y devuelve una URL de subida directa.
 //   2. El browser hace PUT del video directo a Drive (no pasa por Vercel).
-//   3. Si Drive no está configurado, cae al bucket de Supabase (AdsLab).
+//   3. Si Drive no está configurado, cae al bucket de Supabase (Kombialo).
 //   4. Registra el archivo en la tarjeta (addArchivos) y, si estaba en
 //      "Por hacer", la manda sola a "En revisión".
 //
@@ -85,7 +85,7 @@ export async function probeDrive(productoNombre, persona, weekKey, cardId, folde
 // PLAN B: subir a Drive VÍA NUESTRO SERVER en chunks (< 4MB c/u). Se usa
 // cuando el PUT directo browser→Google falla (CORS u otro bloqueo): el server
 // reenvía cada chunk a la sesión de Google con Content-Range, y ahí CORS no
-// existe. También destraba los videos grandes (AdsLab corta en ~50MB).
+// existe. También destraba los videos grandes (Kombialo corta en ~50MB).
 async function uploadViaRelay(file, sess, token, onBytes) {
   const CHUNK = 15 * 256 * 1024; // 3.75MB — múltiplo de 256KiB (requisito de Google)
   const total = file.size;
@@ -134,7 +134,7 @@ async function uploadOne(file, ctx, onBytes) {
       sess = { configured: false, error: e?.message || 'no se pudo abrir la subida' };
     }
     // Drive falló transitoriamente (OAuth): reintentamos UNA vez antes de
-    // resignarnos a AdsLab — queremos que TODO termine en Drive.
+    // resignarnos a Kombialo — queremos que TODO termine en Drive.
     if (sess?.configured === false && sess?.reason === 'drive-oauth-transitorio' && intento < 2) {
       await new Promise((r) => setTimeout(r, 2000));
       continue;
@@ -192,7 +192,7 @@ async function uploadOne(file, ctx, onBytes) {
       return armarArchivo(await uploadViaRelay(file, sess, token, onBytes));
     } catch (e2) {
       driveReason = `${driveReason ? driveReason + ' | ' : ''}relay: ${e2?.message || e2}`;
-      console.warn('[produccion] Drive falló:', driveReason, '— cayendo a AdsLab');
+      console.warn('[produccion] Drive falló:', driveReason, '— cayendo a Kombialo');
     }
   } else if (sess && sess.configured === false) {
     driveReason = sess.reason === 'drive-oauth-transitorio'
@@ -202,8 +202,8 @@ async function uploadOne(file, ctx, onBytes) {
 
   // POLÍTICA "Drive o nada": el equipo necesita los videos SÍ o SÍ en Google
   // Drive. Si no se pudo subir a Drive (ni con los reintentos), NO guardamos en
-  // AdsLab — tiramos error claro y el video NO se registra. El user reintenta o
-  // reconecta Drive. (Los videos viejos que YA están en AdsLab se rescatan con el
+  // Kombialo — tiramos error claro y el video NO se registra. El user reintenta o
+  // reconecta Drive. (Los videos viejos que YA están en Kombialo se rescatan con el
   // botón "Mover a Drive".)
   if (sess?.reason === 'drive-no-conectado') {
     throw new Error('Google Drive no está conectado — el video NO se subió. Conectalo en Ajustes → Conectar Drive y reintentá.');
@@ -261,7 +261,7 @@ export async function subirParaTarjeta(a, fileList, { onProgress, addToast } = {
   let ok = 0, dest = 'drive', driveWarn = null, yaEstaban = 0, versionNueva = 0;
   // Progreso GLOBAL por bytes (barra + % + ETA + velocidad). Todas las subidas a
   // Drive van por el relay en chunks → reportan bytes reales; el fallback a
-  // AdsLab no reporta chunks, así que ahí la barra salta al terminar el archivo.
+  // Kombialo no reporta chunks, así que ahí la barra salta al terminar el archivo.
   const totalBytes = files.reduce((s, f) => s + (f.size || 0), 0);
   const t0 = Date.now();
   let sentBefore = 0; // bytes de archivos ya terminados
@@ -296,9 +296,9 @@ export async function subirParaTarjeta(a, fileList, { onProgress, addToast } = {
   // primero). Antes se movía con ok>0, lo que la mandaba a revisión incompleta.
   const completo = eraPorHacer && (yaTenia + ok) >= objetivo;
   if (completo) updateAssignment(a.id, { estado: 'revision' });
-  if (ok > 0) addToast?.({ type: 'success', message: `${ok} video${ok > 1 ? 's' : ''} → ${dest === 'drive' ? 'Google Drive' : 'AdsLab'}${completo ? ' · pasó a En revisión' : ''}` });
+  if (ok > 0) addToast?.({ type: 'success', message: `${ok} video${ok > 1 ? 's' : ''} → ${dest === 'drive' ? 'Google Drive' : 'Kombialo'}${completo ? ' · pasó a En revisión' : ''}` });
   avisarDuplicados({ yaEstaban, versionNueva, addToast });
-  if (driveWarn) addToast?.({ type: 'warning', message: `⚠ Drive falló (${driveWarn}) — se guardó en AdsLab. Pasale este texto a Claude.` });
+  if (driveWarn) addToast?.({ type: 'warning', message: `⚠ Drive falló (${driveWarn}) — se guardó en Kombialo. Pasale este texto a Claude.` });
   return { ok, yaEstaban };
 }
 
@@ -309,7 +309,7 @@ export async function subirParaTarjeta(a, fileList, { onProgress, addToast } = {
 //      archivo nuevo entra sin `correccion`, o sea que salda el pedido.
 //   3. Manda el viejo a la papelera de Drive (best effort — si falla, el
 //      reemplazo en la tarjeta ya está hecho y solo queda un huérfano en la
-//      carpeta) o lo borra de AdsLab si era del fallback.
+//      carpeta) o lo borra de Kombialo si era del fallback.
 //   4. Si la tarjeta estaba en "Por hacer" y no quedan correcciones
 //      pendientes, vuelve sola a "En revisión".
 export async function reemplazarVideo(a, viejo, file, { addToast } = {}) {
@@ -334,7 +334,7 @@ export async function reemplazarVideo(a, viejo, file, { addToast } = {}) {
   };
   replaceArchivo(a.id, viejo.ts, archivo);
 
-  // El viejo, afuera: papelera de Drive (recuperable 30 días) o storage AdsLab.
+  // El viejo, afuera: papelera de Drive (recuperable 30 días) o storage Kombialo.
   if (viejo.driveId) {
     fetch('/api/produccion/drive-trash', {
       method: 'POST',
@@ -352,16 +352,16 @@ export async function reemplazarVideo(a, viejo, file, { addToast } = {}) {
   return { ok: true, paso, restantes, destino: archivo.destino, driveError: archivo.driveError || null, nuevoTs: archivo.ts };
 }
 
-// Mueve a Google Drive los videos de una tarjeta que quedaron en AdsLab (por un
+// Mueve a Google Drive los videos de una tarjeta que quedaron en Kombialo (por un
 // hipo de Drive al subirse). Corre server-side (endpoint drive-migrate): el
 // service role lee el bucket por-usuario y sube al Drive del dueño; solo borra la
-// copia de AdsLab DESPUÉS de confirmar el archivo en Drive. Secuencial (una por
+// copia de Kombialo DESPUÉS de confirmar el archivo en Drive. Secuencial (una por
 // vez) para no pisar la fila de la tarjeta. El server actualiza el registro; acá
 // refrescamos al final.
 export async function moverArchivosADrive(a, { onProgress, addToast } = {}) {
   const token = await getAuthToken();
   const pendientes = (a.archivos || []).filter(f => f && f.destino !== 'drive' && f.storagePath);
-  if (pendientes.length === 0) { addToast?.({ type: 'info', message: 'No hay videos en AdsLab para mover.' }); return { ok: 0, fail: 0 }; }
+  if (pendientes.length === 0) { addToast?.({ type: 'info', message: 'No hay videos en Kombialo para mover.' }); return { ok: 0, fail: 0 }; }
   let ok = 0, fail = 0, firstErr = null;
   for (let i = 0; i < pendientes.length; i++) {
     const f = pendientes[i];
@@ -499,7 +499,7 @@ export function CreativosSection({ a, addToast, canDelete = true, readOnly = fal
           message: `Video ${target.nVid} reemplazado ✓${r.paso ? ' · la tarjeta volvió a En revisión'
             : r.restantes > 0 ? ` · falta${r.restantes > 1 ? 'n' : ''} ${r.restantes} corrección${r.restantes > 1 ? 'es' : ''}` : ''}`,
         });
-        if (r.driveError) addToast?.({ type: 'warning', message: `⚠ Drive falló (${r.driveError}) — el reemplazo quedó en AdsLab.` });
+        if (r.driveError) addToast?.({ type: 'warning', message: `⚠ Drive falló (${r.driveError}) — el reemplazo quedó en Kombialo.` });
       }
     } catch (err) {
       addToast?.({ type: 'error', message: `No pude reemplazar el Video ${target.nVid}: ${err.message}` });
@@ -508,14 +508,14 @@ export function CreativosSection({ a, addToast, canDelete = true, readOnly = fal
     }
   };
   const folderLink = (a.archivos || []).find(f => f.folderLink)?.folderLink;
-  // ¿Todos los archivos cayeron a AdsLab? (pueden ser de ANTES de conectar Drive)
+  // ¿Todos los archivos cayeron a Kombialo? (pueden ser de ANTES de conectar Drive)
   const soloAdslab = (a.archivos?.length > 0) && !folderLink && a.archivos.every(f => f.destino !== 'drive');
-  // Videos que quedaron en AdsLab y se pueden mover a Drive.
+  // Videos que quedaron en Kombialo y se pueden mover a Drive.
   const adslabVideos = (a.archivos || []).filter(f => f && f.destino !== 'drive' && f.storagePath);
   const moverADrive = async () => {
     if (migrando || adslabVideos.length === 0) return;
     const n = adslabVideos.length;
-    if (!(await confirmDialog({ title: `¿Mover ${n} video${n > 1 ? 's' : ''} a Google Drive?`, message: 'Se copian a la carpeta de la tarjeta y recién se sacan de AdsLab cuando se confirmó que quedaron en Drive.', confirmLabel: 'Mover' }))) return;
+    if (!(await confirmDialog({ title: `¿Mover ${n} video${n > 1 ? 's' : ''} a Google Drive?`, message: 'Se copian a la carpeta de la tarjeta y recién se sacan de Kombialo cuando se confirmó que quedaron en Drive.', confirmLabel: 'Mover' }))) return;
     setMigrando({ i: 0, total: n, name: '' });
     try {
       await moverArchivosADrive(a, { addToast, onProgress: (p) => setMigrando(p.done ? null : p) });
@@ -523,7 +523,7 @@ export function CreativosSection({ a, addToast, canDelete = true, readOnly = fal
   };
 
   // Sondeo real al server: ¿Drive está conectado HOY? Así el cartel no miente
-  // cuando la tarjeta solo tiene videos viejos de AdsLab.
+  // cuando la tarjeta solo tiene videos viejos de Kombialo.
   // Sondeo con el producto: trae si Drive está conectado + el link a la
   // carpeta del producto (se asegura de que exista), para ofrecer "carpeta de
   // Drive" SIEMPRE que la conexión esté viva, tenga o no videos en Drive.
@@ -536,7 +536,7 @@ export function CreativosSection({ a, addToast, canDelete = true, readOnly = fal
   // Prioridad: la carpeta EXACTA de la tarjeta (donde están/irán los videos).
   const driveFolder = folderLink || drive?.cardLink || drive?.prodLink || drive?.rootLink || null;
 
-  // Ver un video guardado en AdsLab: el bucket es privado, así que generamos
+  // Ver un video guardado en Kombialo: el bucket es privado, así que generamos
   // un link firmado (1h) al momento del click.
   const verVideo = async (f) => {
     try {
@@ -596,9 +596,9 @@ export function CreativosSection({ a, addToast, canDelete = true, readOnly = fal
       const completoAhora = (yaTenia + ok) >= objetivo;
       const paso = eraPorHacer && completoAhora;
       if (paso) updateAssignment(a.id, { estado: 'revision' });
-      if (ok > 0) addToast?.({ type: 'success', message: `${ok} video${ok > 1 ? 's' : ''} → ${dest === 'drive' ? 'Google Drive' : 'AdsLab'}${paso ? ' · completo, pasó a En revisión ✓' : (eraPorHacer ? ` · ${yaTenia + ok}/${objetivo}` : '')}` });
+      if (ok > 0) addToast?.({ type: 'success', message: `${ok} video${ok > 1 ? 's' : ''} → ${dest === 'drive' ? 'Google Drive' : 'Kombialo'}${paso ? ' · completo, pasó a En revisión ✓' : (eraPorHacer ? ` · ${yaTenia + ok}/${objetivo}` : '')}` });
       avisarDuplicados({ yaEstaban, versionNueva, addToast });
-      if (driveWarn) addToast?.({ type: 'warning', message: `⚠ Drive falló (${driveWarn}) — se guardó en AdsLab. Pasale este texto a Claude.` });
+      if (driveWarn) addToast?.({ type: 'warning', message: `⚠ Drive falló (${driveWarn}) — se guardó en Kombialo. Pasale este texto a Claude.` });
       setFiles(prev => prev.filter(f => f.status !== 'ok'));
     } finally {
       setBusy(false);
@@ -622,7 +622,7 @@ export function CreativosSection({ a, addToast, canDelete = true, readOnly = fal
         )}
         {adslabVideos.length > 0 && drive?.configured === true && (
           <button onClick={moverADrive} disabled={!!migrando}
-            title="Sube estos videos (que quedaron en AdsLab) a la carpeta de Drive de la tarjeta y los saca de AdsLab — recién cuando se confirmó que quedaron en Drive."
+            title="Sube estos videos (que quedaron en Kombialo) a la carpeta de Drive de la tarjeta y los saca de Kombialo — recién cuando se confirmó que quedaron en Drive."
             className="ml-1 inline-flex items-center gap-1 text-[11px] font-bold text-brand-600 dark:text-brand-300 border border-brand-300 dark:border-brand-700 rounded-md px-1.5 py-0.5 hover:bg-brand-50 dark:hover:bg-brand-900/20 transition disabled:opacity-60">
             {migrando
               ? <><Loader2 size={11} className="animate-spin" /> Moviendo {Math.min(migrando.i + 1, migrando.total)}/{migrando.total}…</>
@@ -631,8 +631,8 @@ export function CreativosSection({ a, addToast, canDelete = true, readOnly = fal
         )}
         {soloAdslab && drive?.configured === false && (
           <span className="text-[11px] font-bold text-amber-600 dark:text-amber-400 ml-1 cursor-help"
-            title="Google Drive no está conectado, así que los videos se guardan en AdsLab (podés verlos con el ícono de cada archivo). Para que vayan a una carpeta de Drive: configurar DRIVE_CREATIVOS_FOLDER_ID en Vercel.">
-            ⚠ Drive no conectado — se guardan en AdsLab
+            title="Google Drive no está conectado, así que los videos se guardan en Kombialo (podés verlos con el ícono de cada archivo). Para que vayan a una carpeta de Drive: configurar DRIVE_CREATIVOS_FOLDER_ID en Vercel.">
+            ⚠ Drive no conectado — se guardan en Kombialo
           </span>
         )}
       </div>
@@ -664,14 +664,14 @@ export function CreativosSection({ a, addToast, canDelete = true, readOnly = fal
                     4 celdas FIJAS → todas las filas quedan alineadas en columnas.
                     Celda sin acción = span vacío del mismo ancho, nunca se omite. */}
                 <span className="shrink-0 grid grid-flow-col auto-cols-[26px] gap-1 items-center justify-items-center">
-                  {/* 1 · Ver el video (logo Drive real, o link firmado AdsLab) */}
+                  {/* 1 · Ver el video (logo Drive real, o link firmado Kombialo) */}
                   {f.link ? (
                     <a href={f.link} target="_blank" rel="noopener noreferrer" title="Ver en Drive"
                       className="w-[26px] h-[26px] rounded-lg inline-flex items-center justify-center hover:bg-black/5 dark:hover:bg-white/10 transition">
                       <DriveLogo size={14} />
                     </a>
                   ) : f.storagePath ? (
-                    <button onClick={() => verVideo(f)} title="Ver el video (AdsLab)"
+                    <button onClick={() => verVideo(f)} title="Ver el video (Kombialo)"
                       className="w-[26px] h-[26px] rounded-lg inline-flex items-center justify-center text-brand-500 hover:bg-black/5 dark:hover:bg-white/10 transition">
                       <ExternalLink size={13} />
                     </button>

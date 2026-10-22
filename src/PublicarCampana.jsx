@@ -1,9 +1,9 @@
-// 🚀 Publicar campaña — el lanzador de AdsLab (pestaña de Métricas).
+// 🚀 Publicar campaña — el lanzador de Kombialo (pestaña de Métricas).
 //
 // Armás acá lo que antes armabas a mano en el Ads Manager: elegís una de las
 // tres recetas del equipo (CBO Deep Pocket / CBO Cost Cap / ABO Bid Cap),
 // presupuesto y puja, la config básica (página, píxel, país, edades) y pegás
-// los anuncios como "Nombre | post id" (uno por línea). AdsLab crea campaña +
+// los anuncios como "Nombre | post id" (uno por línea). Kombialo crea campaña +
 // conjuntos + creativos + ads en Meta, PAUSADO por default para que revises.
 //
 // Post id: puede venir "pageId_postId" (como lo da Meta) o el id pelado — en
@@ -11,10 +11,9 @@
 
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
-  Rocket, Loader2, AlertCircle, CheckCircle2, XCircle, ExternalLink,
+  Rocket, Loader2, AlertCircle, CheckCircle2, XCircle, ExternalLink, X,
 } from 'lucide-react';
 import { authHeaders } from './MetaConnect.jsx';
-import { confirmDialog } from './dialogs.jsx';
 import FechaHoraPicker from './FechaHoraPicker.jsx';
 
 // Cada receta trae los números con los que el equipo la arma siempre. Son
@@ -117,9 +116,50 @@ export default function PublicarCampana({ accountId, connId, currency, addToast,
   // AR · 18-65 con Advantage+, que es como arma los testeos el equipo.
   const pais = 'AR', edadMin = 18, edadMax = 65;
   const [pageId, setPageId] = useState('');
+  // 'auto' = el IG vinculado a la página dueña de cada post; 'none' = solo FB.
+  const [igId, setIgId] = useState('auto');
+  const [confirmacion, setConfirmacion] = useState(null);
+  // Progreso real de la creación (eventos que manda el server por stream).
+  const [progreso, setProgreso] = useState(null);
   const [pixelId, setPixelId] = useState('');
   const [adsText, setAdsText] = useState('');
   const [activar, setActivar] = useState(false);
+
+  // ÚLTIMA CONFIGURACIÓN por cuenta publicitaria (pedido del user): receta,
+  // presupuesto, pujas, conjuntos, página, Instagram, píxel y "crear activa"
+  // quedan como los dejaste la última vez. Los anuncios y la fecha no (son
+  // de cada tirada).
+  const cfgKey = `adslab-escalar-cfg-${accountId}`;
+  const cfgCargada = useRef(false);
+  // Al restaurar, el efecto de "cambiar de receta trae sus números" NO tiene
+  // que pisar lo restaurado: se saltea hasta ver la receta restaurada.
+  const restaurada = useRef(null);
+  useEffect(() => {
+    cfgCargada.current = false;
+    try {
+      const c = JSON.parse(localStorage.getItem(cfgKey) || 'null');
+      if (c) {
+        restaurada.current = { estructura: c.estructura || estructura };
+        if (c.estructura) setEstructura(c.estructura);
+        if (c.presupuesto != null) setPresupuesto(c.presupuesto);
+        if (c.puja != null) setPuja(c.puja);
+        if (c.pujas) setPujas(c.pujas);
+        if (c.conjuntos) setConjuntos(c.conjuntos);
+        if (typeof c.duplicarAds === 'boolean') setDuplicarAds(c.duplicarAds);
+        if (c.pageId) setPageId(c.pageId);
+        if (c.igId) setIgId(c.igId);
+        if (c.pixelId) setPixelId(c.pixelId);
+        if (typeof c.activar === 'boolean') setActivar(c.activar);
+      }
+    } catch {}
+    cfgCargada.current = true;
+  }, [cfgKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (!cfgCargada.current || !accountId) return;
+    try {
+      localStorage.setItem(cfgKey, JSON.stringify({ estructura, presupuesto, puja, pujas, conjuntos, duplicarAds, pageId, igId, pixelId, activar }));
+    } catch {}
+  }, [cfgKey, accountId, estructura, presupuesto, puja, pujas, conjuntos, duplicarAds, pageId, igId, pixelId, activar]);
   const [prereqs, setPrereqs] = useState(null);
   const [busy, setBusy] = useState(false);
   const [resultado, setResultado] = useState(null);
@@ -149,6 +189,10 @@ export default function PublicarCampana({ accountId, connId, currency, addToast,
   // receta es justamente pedir otra configuración.
   useEffect(() => {
     if (!receta) return;
+    if (restaurada.current) {
+      if (restaurada.current.estructura === estructura) restaurada.current = null;
+      return;
+    }
     setConjuntos(receta.conjuntos ?? 1);
     const def = presupuestoDefault(receta, currency);
     setPresupuesto(def != null ? String(def) : '');
@@ -193,8 +237,9 @@ export default function PublicarCampana({ accountId, connId, currency, addToast,
         const d = await r.json().catch(() => ({}));
         if (muerto) return;
         setPrereqs(d);
-        if (!pixelId && d.pixels?.[0]) setPixelId(d.pixels[0].id);
-        if (!pageId && d.pages?.[0]) setPageId(d.pages[0].id);
+        // Lo guardado manda; si no existe en esta cuenta, el primero.
+        setPixelId(prev => (prev && (d.pixels || []).some(p => p.id === prev)) ? prev : (d.pixels?.[0]?.id || ''));
+        setPageId(prev => (prev && (d.pages || []).some(p => p.id === prev)) ? prev : (d.pages?.[0]?.id || ''));
       } catch { if (!muerto) setPrereqs({ pixels: [], pages: [] }); }
     })();
     return () => { muerto = true; };
@@ -216,27 +261,34 @@ export default function PublicarCampana({ accountId, connId, currency, addToast,
   const publicar = async () => {
     if (!listo || busy) return;
     const presupuestoTxt = `$${num(presupuesto).toLocaleString('es-AR')}${estructura.startsWith('abo') ? ' por conjunto' : ''} / día`;
-    const ok = await confirmDialog({
-      title: `🚀 Crear "${nombre}" en Meta`,
-      message: [
-        `${receta.emoji} ${receta.titulo} · ${conjuntos} conjunto${conjuntos === 1 ? '' : 's'}`,
-        duplicarAds && conjuntos > 1
-          ? `${adsOk.length} anuncio${adsOk.length === 1 ? '' : 's'} en CADA conjunto → ${totalAds} anuncios en total`
-          : `${adsOk.length} anuncio${adsOk.length === 1 ? '' : 's'} repartido${adsOk.length === 1 ? '' : 's'} entre los conjuntos`,
-        `Presupuesto: ${presupuestoTxt}${receta.puja && !esAbo ? ` · ${receta.puja.toLowerCase()}: $${num(puja).toLocaleString('es-AR')}` : ''}`,
-        ...(receta.puja && esAbo
-          ? [`${receta.puja} por conjunto: ${Array.from({ length: conjuntos }, (_, i) => `C${i + 1} $${num(pujaDelSet(i)).toLocaleString('es-AR')}`).join(' · ')}`]
-          : []),
-        `${pais} · ${edadMin}-${edadMax} años · Advantage+ audience y ubicaciones automáticas`,
-        ...(programada ? [`🗓 Programada para el ${new Date(`${programada}:00-03:00`).toLocaleString('es-AR', { timeZone: 'America/Argentina/Buenos_Aires', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })} hs (AR) — no gasta antes.`] : []),
-        activar ? (programada ? 'Se crea ACTIVA pero PROGRAMADA: arranca recién en esa fecha.' : '⚠️ Se crea ACTIVA: empieza a gastar al toque.')
-          : (programada ? '⚠️ Se crea PAUSADA: aunque esté programada, NO va a arrancar hasta que la actives en Meta.' : 'Se crea PAUSADA: la revisás en Meta y la encendés.'),
-      ].join('\n'),
-      confirmLabel: 'Crear en Meta',
-      tone: activar ? 'danger' : 'brand',
-    });
+    // Confirmación estilo checklist (prototipo F elegido): el cartel viejo
+    // usaba ⚠️ + botón rojo y parecía un error.
+    const fmtFecha = (v) => new Date(`${v}:00-03:00`).toLocaleString('es-AR', { timeZone: 'America/Argentina/Buenos_Aires', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+    const igTxt = igId === 'none' ? 'solo Facebook (sin Instagram)'
+      : igId === 'auto' ? 'con el Instagram de cada página'
+      : `con @${(prereqs?.pages || []).find(p => p.instagram_business_account?.id === igId)?.instagram_business_account?.username || 'Instagram'}`;
+    const items = [
+      { ok: true, txt: `${receta.titulo}${receta.puja && !esAbo ? ` · ${receta.puja.toLowerCase()} $${num(puja).toLocaleString('es-AR')}` : ''}` },
+      ...(receta.puja && esAbo ? [{ ok: true, txt: `${receta.puja} por conjunto: ${Array.from({ length: conjuntos }, (_, i) => `C${i + 1} $${num(pujaDelSet(i)).toLocaleString('es-AR')}`).join(' · ')}` }] : []),
+      { ok: true, txt: presupuestoTxt },
+      { ok: true, txt: `${conjuntos} conjunto${conjuntos === 1 ? '' : 's'} · ${duplicarAds && conjuntos > 1 ? `${totalAds} anuncios (${adsOk.length} en cada uno)` : `${adsOk.length} anuncio${adsOk.length === 1 ? '' : 's'}`} ${igTxt}` },
+      { ok: true, txt: `${pais} · ${edadMin}-${edadMax} años · Advantage+` },
+      programada
+        ? (activar
+          ? { ok: true, txt: `Programada para el ${fmtFecha(programada)} hs — no gasta antes` }
+          : { ok: false, txt: `Programada para el ${fmtFecha(programada)} hs, pero se crea PAUSADA: no arranca hasta que la actives en Meta` })
+        : (activar
+          ? { ok: false, txt: 'Se crea ACTIVA: empieza a gastar apenas se crea' }
+          : { ok: true, txt: 'Se crea pausada: la revisás en Meta y la encendés' }),
+    ];
+    const ok = await new Promise(resolve => setConfirmacion({ titulo: nombre.trim(), items, resolve }));
+    setConfirmacion(null);
     if (!ok) return;
     setBusy(true); setResultado(null);
+    const nSets = conjuntos;
+    const adsPorSet = Array.from({ length: nSets }, (_, i) => (duplicarAds ? adsOk.length
+      : adsOk.filter((_, j) => j % nSets === i).length));
+    setProgreso({ campana: 'run', sets: adsPorSet.map(n => ({ estado: 'wait', total: n, ok: 0, err: 0 })), fin: 'wait' });
     try {
       const r = await fetch('/api/meta/launch-campaign', {
         method: 'POST',
@@ -248,12 +300,58 @@ export default function PublicarCampana({ accountId, connId, currency, addToast,
           presupuesto: num(presupuesto), puja: receta.puja ? num(puja) : 0,
           pujas: receta.puja && esAbo ? Array.from({ length: conjuntos }, (_, i) => num(pujaDelSet(i))) : undefined,
           startTime: programada ? `${programada}:00-03:00` : undefined,
-          conjuntos, duplicarAds, pageId, pixelId, pais, edadMin, edadMax,
+          conjuntos, duplicarAds, pageId, instagramUserId: igId, pixelId, pais, edadMin, edadMax,
           ads: adsOk.map(a => ({ name: a.name, postId: a.postId })),
           activar,
+          stream: true,
         }),
       });
-      const d = await r.json().catch(() => ({}));
+      // Lectura del stream NDJSON: cada línea es un paso confirmado por Meta.
+      let d = {};
+      if ((r.headers.get('content-type') || '').includes('ndjson') && r.body) {
+        const reader = r.body.getReader();
+        const dec = new TextDecoder();
+        let buf = '';
+        const aplicar = (ev) => {
+          if (ev.type === 'done') { d = ev; return; }
+          setProgreso(p => {
+            if (!p) return p;
+            const sets = p.sets.map(x => ({ ...x }));
+            if (ev.type === 'campaign') return { ...p, campana: 'done', sets: sets.map((x, i) => (i === 0 ? { ...x, estado: 'run' } : x)) };
+            if (ev.type === 'adset' && sets[ev.i]) {
+              sets[ev.i].estado = ev.ok ? 'run' : 'err';
+              if (!ev.ok && sets[ev.i + 1]) sets[ev.i + 1].estado = 'run';
+              return { ...p, sets };
+            }
+            if (ev.type === 'ad' && sets[ev.i]) {
+              const x = sets[ev.i];
+              if (ev.ok) x.ok++; else x.err++;
+              if (x.ok + x.err >= x.total) {
+                x.estado = x.err ? (x.ok ? 'warn' : 'err') : 'done';
+                if (sets[ev.i + 1] && sets[ev.i + 1].estado === 'wait') sets[ev.i + 1].estado = 'run';
+              }
+              const todos = sets.every(z => ['done', 'warn', 'err'].includes(z.estado));
+              return { ...p, sets, fin: todos ? 'run' : p.fin };
+            }
+            return p;
+          });
+        };
+        for (;;) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          buf += dec.decode(value, { stream: true });
+          let k;
+          while ((k = buf.indexOf('\n')) >= 0) {
+            const linea = buf.slice(0, k).trim(); buf = buf.slice(k + 1);
+            if (linea) { try { aplicar(JSON.parse(linea)); } catch {} }
+          }
+        }
+        if (buf.trim()) { try { aplicar(JSON.parse(buf.trim())); } catch {} }
+        setProgreso(p => (p ? { ...p, fin: 'done', campana: d.campaignId ? 'done' : 'err' } : p));
+      } else {
+        d = await r.json().catch(() => ({}));
+        setProgreso(null);
+      }
       setResultado(d);
       if (d.campaignId && d.ok) addToast?.({ type: 'success', message: `🚀 "${nombre}" creada en Meta (${d.creados} ads, ${d.estado === 'ACTIVE' ? 'ACTIVA' : 'pausada'})` });
       else if (d.campaignId) addToast?.({ type: 'warning', message: 'Campaña creada con detalles — mirá el resumen.' });
@@ -265,6 +363,42 @@ export default function PublicarCampana({ accountId, connId, currency, addToast,
 
   return (
     <div className="space-y-4">
+      {confirmacion && (
+        <div className="fixed inset-0 z-[80] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => confirmacion.resolve(false)}>
+          <div className="w-full max-w-md rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 shadow-2xl overflow-hidden" onClick={e => e.stopPropagation()}>
+            <div className="flex gap-1 px-5 pt-4">
+              {[0, 1, 2].map(i => <span key={i} className="flex-1 h-1 rounded-full bg-brand-500" />)}
+            </div>
+            <div className="flex items-start gap-3 px-5 pt-4 pb-2">
+              <span className="w-9 h-9 rounded-xl bg-emerald-500/15 text-emerald-500 flex items-center justify-center shrink-0"><CheckCircle2 size={19} /></span>
+              <div className="min-w-0 flex-1">
+                <p className="text-[15px] font-extrabold text-gray-900 dark:text-gray-100">
+                  {confirmacion.items.every(i => i.ok) ? 'Todo listo para lanzar' : 'Revisá antes de lanzar'}
+                </p>
+                <p className="text-xs text-gray-500 dark:text-gray-400 break-words">{confirmacion.titulo}</p>
+              </div>
+              <button onClick={() => confirmacion.resolve(false)} className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200"><X size={16} /></button>
+            </div>
+            <ul className="px-5 pb-4 pt-1 space-y-2">
+              {confirmacion.items.map((it, i) => (
+                <li key={i} className={`flex items-start gap-2 text-[13px] leading-snug ${it.ok ? 'text-gray-700 dark:text-gray-200' : 'text-amber-600 dark:text-amber-400'}`}>
+                  {it.ok
+                    ? <CheckCircle2 size={15} className="text-emerald-500 shrink-0 mt-0.5" />
+                    : <AlertCircle size={15} className="shrink-0 mt-0.5" />}
+                  <span>{it.txt}</span>
+                </li>
+              ))}
+            </ul>
+            <div className="flex justify-end gap-2 px-5 py-3 border-t border-gray-100 dark:border-gray-800">
+              <button onClick={() => confirmacion.resolve(false)} className="px-4 py-2 text-sm font-semibold text-gray-500 hover:text-gray-800 dark:hover:text-gray-200">Volver</button>
+              <button onClick={() => confirmacion.resolve(true)} autoFocus
+                className="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-bold text-white bg-brand-600 hover:bg-brand-700 rounded-lg transition">
+                <Rocket size={14} /> Crear en Meta
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       {/* receta */}
       {/* Las 4 recetas en UNA línea en pantallas anchas (pedido del user). */}
       <div className="grid sm:grid-cols-2 xl:grid-cols-4 gap-2.5">
@@ -369,7 +503,7 @@ export default function PublicarCampana({ accountId, connId, currency, addToast,
         )}
 
         {/* Cuenta y programación */}
-        <div className="grid sm:grid-cols-2 gap-3 items-start">
+        <div className="grid sm:grid-cols-3 gap-3 items-start">
           <Campo label="Píxel (evento Compra)">
             <select className={inputCls} value={pixelId} onChange={e => setPixelId(e.target.value)}>
               {!prereqs && <option>Cargando…</option>}
@@ -377,10 +511,23 @@ export default function PublicarCampana({ accountId, connId, currency, addToast,
               {(prereqs?.pixels || []).map(p => <option key={p.id} value={p.id}>{p.name || p.id}</option>)}
             </select>
           </Campo>
-          <Campo label="Página (para post ids sin «_»)">
+          <Campo label="Página de Facebook"
+            hint="Si un post es de otra página tuya, se detecta sola.">
             <select className={inputCls} value={pageId} onChange={e => setPageId(e.target.value)}>
               {(prereqs?.pages || []).map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
               {prereqs?.pages?.length === 0 && <option value="">Sin páginas visibles</option>}
+            </select>
+          </Campo>
+          <Campo label="Instagram"
+            hint="Automático: el IG de la página del post o, si no tiene, el de la página elegida.">
+            <select className={inputCls} value={igId} onChange={e => setIgId(e.target.value)}>
+              <option value="auto">Automático (IG de la página)</option>
+              {(prereqs?.pages || []).filter(p => p.instagram_business_account?.id).map(p => (
+                <option key={p.instagram_business_account.id} value={p.instagram_business_account.id}>
+                  @{p.instagram_business_account.username || p.instagram_business_account.id} · {p.name}
+                </option>
+              ))}
+              <option value="none">Sin Instagram (solo Facebook)</option>
             </select>
           </Campo>
         </div>
@@ -427,6 +574,32 @@ export default function PublicarCampana({ accountId, connId, currency, addToast,
         </button>
         {!listo && <span className="text-[11px] text-gray-400">Completá nombre, presupuesto{receta.puja ? ', puja' : ''}, píxel y al menos un anuncio.</span>}
       </div>
+
+      {/* Progreso real (prototipo B): pasos que se tildan a medida que Meta
+          confirma la campaña, cada conjunto y sus anuncios. */}
+      {progreso && (busy || !resultado) && (
+        <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800/60 p-4 space-y-2.5">
+          {[
+            { label: 'Campaña', estado: progreso.campana },
+            ...progreso.sets.map((x, i) => ({
+              label: `Conjunto ${i + 1} · ${x.total} anuncio${x.total === 1 ? '' : 's'}`,
+              estado: x.estado,
+              det: x.ok + x.err > 0 ? `${x.ok}/${x.total} creados${x.err ? ` · ${x.err} con error` : ''}` : null,
+            })),
+            { label: 'Revisión final', estado: progreso.fin },
+          ].map((p, i) => (
+            <div key={i} className={`flex items-center gap-2.5 text-[13px] ${p.estado === 'wait' ? 'text-gray-400' : 'text-gray-800 dark:text-gray-100'}`}>
+              {p.estado === 'done' ? <CheckCircle2 size={17} className="text-emerald-500 shrink-0" />
+                : p.estado === 'run' ? <Loader2 size={17} className="animate-spin text-brand-500 shrink-0" />
+                : p.estado === 'err' ? <XCircle size={17} className="text-red-500 shrink-0" />
+                : p.estado === 'warn' ? <AlertCircle size={17} className="text-amber-500 shrink-0" />
+                : <span className="w-[17px] h-[17px] rounded-full border-2 border-gray-300 dark:border-gray-600 shrink-0" />}
+              <span className="font-semibold">{p.label}</span>
+              {p.det && <span className="text-[11.5px] text-gray-400 tabular-nums">{p.det}</span>}
+            </div>
+          ))}
+        </div>
+      )}
 
       {/* resultado */}
       {resultado && (

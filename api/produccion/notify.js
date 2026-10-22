@@ -79,7 +79,7 @@ function mentionsForEvent(config, evCfg) {
 // Postea un embed (con menciones opcionales en content) a UN webhook.
 async function postDiscord(url, embed, content) {
   try {
-    const payload = { username: 'AdsLab · Producción', embeds: [embed] };
+    const payload = { username: 'Kombialo · Producción', embeds: [embed] };
     if (content) { payload.content = content; payload.allowed_mentions = { parse: ['users', 'roles'] }; }
     const r = await fetch(url, {
       method: 'POST',
@@ -157,7 +157,7 @@ export default async function handler(req, res) {
   // Link a la carpeta de Drive (solo si es una URL de Drive válida).
   const folderLink = String(body.folderLink || '').trim();
   const driveOk = /^https:\/\/(drive|docs)\.google\.com\//i.test(folderLink);
-  // Link DIRECTO a la tarjeta en AdsLab (abre esa tarjeta puntual). Es un link
+  // Link DIRECTO a la tarjeta en Kombialo (abre esa tarjeta puntual). Es un link
   // que se muestra para clickear (no lo fetchea el server) — validamos http(s).
   const cardUrl = String(body.cardUrl || '').trim();
   const cardUrlOk = /^https?:\/\//i.test(cardUrl);
@@ -170,7 +170,7 @@ export default async function handler(req, res) {
   if (who) fields.push({ name: event === 'nuevo' ? 'Creó' : event === 'correccion' ? 'Pidió' : 'Movió', value: who, inline: true });
   if (semana) fields.push({ name: 'Semana', value: semana, inline: true });
   if (event === 'correccion' && detalle) fields.push({ name: 'Qué corregir', value: detalle, inline: false });
-  if (cardUrlOk) fields.push({ name: 'Tarjeta', value: `[👉 Abrir esta tarjeta en AdsLab](${cardUrl})`, inline: false });
+  if (cardUrlOk) fields.push({ name: 'Tarjeta', value: `[👉 Abrir esta tarjeta en Kombialo](${cardUrl})`, inline: false });
   if (driveOk) fields.push({ name: 'Videos', value: `[📁 Abrir carpeta de Drive](${folderLink})`, inline: false });
 
   const embed = {

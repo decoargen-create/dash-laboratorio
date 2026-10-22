@@ -1,34 +1,42 @@
 import React from 'react';
 
-// Logo de AdsLab — wordmark simple para reemplazar al de Viora en el header
-// y login screen. La versión SVG full de Viora queda como VioraLogo abajo
-// por compatibilidad si después la necesitamos.
-export function AdsLabLogo({ variant = 'default', size = 'md', className = '' }) {
-  const sizes = {
-    sm: 'text-xl',
-    md: 'text-3xl',
-    lg: 'text-5xl',
-    xl: 'text-6xl',
-  };
-  const color = variant === 'light' ? 'text-white' : 'text-gray-900 dark:text-white';
+// Logo de Kombialo: la K blanca sobre el cuadrado con degradado azul y el
+// punto celeste (mismos trazos que LogoKombialo.tsx de Kombialo). El id del
+// degradado sale de useId(): con un id fijo, si el primer logo quedaba en un
+// nodo oculto el navegador no pintaba el fondo del resto.
+export function KombialoMark({ size = 24, className = '', style }) {
+  const id = 'kbK' + React.useId().replace(/[^a-zA-Z0-9_-]/g, '');
   return (
-    <div className={`inline-flex items-baseline gap-1 ${className}`}>
-      <span className={`font-extrabold tracking-tight ${sizes[size] || sizes.md} ${color}`}>
-        Ads
-      </span>
-      <span className={`font-extrabold tracking-tight ${sizes[size] || sizes.md} bg-gradient-to-r from-purple-500 to-violet-500 bg-clip-text text-transparent`}>
-        Lab
-      </span>
-    </div>
+    <svg width={size} height={size} viewBox="0 0 1024 1024" className={className} aria-hidden="true" focusable="false"
+      style={{ display: 'block', flexShrink: 0, ...style }}>
+      <defs>
+        <linearGradient id={id} x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stopColor="#0a9fff" />
+          <stop offset="0.5" stopColor="#1b6aea" />
+          <stop offset="1" stopColor="#3a3fce" />
+        </linearGradient>
+      </defs>
+      <rect width="1024" height="1024" rx="256" fill={`url(#${id})`} />
+      <path fill="#fff" d="M288 252H395V470L583 252H748L700 307A65 65 0 0 0 612 400L540 492L742 770H608L467 578L395 662V770H288Z" />
+      <circle cx="665" cy="360" r="38" fill="#2ee3ff" />
+    </svg>
   );
 }
 
-export function AdsLabMark({ size = 24, className = '' }) {
+// Logo + nombre ("Kombialo" en 800, como la barra lateral de Kombialo).
+export function KombialoLogo({ variant = 'default', size = 'md', className = '' }) {
+  const sizes = {
+    sm: { t: 'text-xl', m: 28 },
+    md: { t: 'text-3xl', m: 40 },
+    lg: { t: 'text-5xl', m: 60 },
+    xl: { t: 'text-6xl', m: 72 },
+  };
+  const s = sizes[size] || sizes.md;
+  const color = variant === 'light' ? 'text-white' : 'text-gray-900 dark:text-white';
   return (
-    <div className={`inline-flex items-center justify-center rounded-md bg-gradient-to-br from-purple-600 to-violet-500 text-white font-bold ${className}`}
-      style={{ width: size, height: size, fontSize: size * 0.45 }}
-    >
-      AL
+    <div className={`inline-flex items-center gap-3 ${className}`}>
+      <KombialoMark size={s.m} style={{ borderRadius: s.m * 0.25, boxShadow: '0 4px 12px -4px rgba(38,118,245,0.55)' }} />
+      <span className={`font-extrabold tracking-tight ${s.t} ${color}`}>Kombialo</span>
     </div>
   );
 }

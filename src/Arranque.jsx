@@ -124,6 +124,7 @@ import { trackQuotaFailure, isQuotaError, removeFromQuotaQueue } from './quotaRe
 import AnimatedCounter from './AnimatedCounter.jsx';
 import { getSyncStatus, subscribeSyncStatus } from './syncStatusStore.js';
 import ProductoCostsModal from './ProductoCostsModal.jsx';
+import { soloVisibles } from './productosVisibles.js';
 import ProductoHistorialModal from './ProductoHistorialModal.jsx';
 
 // Avatar del producto: muestra el pote (foto cargada en Setup) y cae al
@@ -3873,8 +3874,9 @@ export default function ArranqueSection({ addToast, onGoToSection, modoAlta = fa
               const tb = Date.parse(b.createdAt || b.created_at || 0) || 0;
               return ta - tb || String(a.id).localeCompare(String(b.id));
             };
-            const productosOrd = [...productos].sort(stableCmp);
-            const conResp = productosOrd.filter(p => (p.responsable || '').trim());
+            const productosOrd = soloVisibles(productos).sort(stableCmp);
+            // Una sola lista para todos (pedido 22/10): sin grupos por responsable.
+            const conResp = [];
             if (conResp.length === 0) {
               return <div className={contClass}>{productosOrd.map(renderProductoCard)}</div>;
             }

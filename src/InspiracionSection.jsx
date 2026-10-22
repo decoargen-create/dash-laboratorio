@@ -50,6 +50,7 @@ import { supabase } from './supabase.js';
 import { notifyMarketingChange } from './useMarketingSync.js';
 import { safeSetItem } from './safeStorage.js';
 import { setCompAds, getCompAds } from './competidorAdsIDB.js';
+import { productoVisible } from './productosVisibles.js';
 import { listBoards, createBoard, addItemsToBoard } from './marketingBoardsApi.js';
 // Galería ahora vive como tab independiente en el workspace (Arranque),
 // no más como modal acá.
@@ -927,70 +928,66 @@ function AdThumb({ ad, brandNombre, brandId = null, isCompetidor = false, fresh 
         </div>
       )}
 
-      {/* En mobile (max-md) los devices sin hover no pueden activar el overlay
-          → forzamos opacity 100 y un tinte oscuro para mantener contraste. */}
-      <div className="absolute inset-0 bg-black/0 group-hover/thumb:bg-black/60 max-md:bg-gradient-to-t max-md:from-black/70 max-md:to-transparent transition flex flex-col items-stretch justify-end gap-1 p-1.5">
+      {/* Anuncio limpio (prototipo 4B): solo la imagen; al pasar el mouse,
+          "Crear creativo" grande al centro y las acciones secundarias como
+          íconos abajo. En mobile (sin hover) se ven siempre, con degradé. */}
+      <div className="absolute inset-0 bg-black/0 group-hover/thumb:bg-black/65 max-md:bg-gradient-to-t max-md:from-black/70 max-md:to-transparent transition flex flex-col items-center justify-center gap-2 p-2">
         {onCrearReferencial && (
           <button
             onClick={(e) => { e.preventDefault(); e.stopPropagation(); onCrearReferencial(); }}
             disabled={creando}
-            className="opacity-0 group-hover/thumb:opacity-100 max-md:opacity-100 transition inline-flex items-center justify-center gap-1 px-2 py-1 text-[10px] font-bold text-white bg-brand-600 hover:bg-brand-700 rounded disabled:opacity-70"
-            title="Genera 2 variaciones con tu producto real"
+            className="opacity-0 group-hover/thumb:opacity-100 max-md:opacity-100 transition inline-flex items-center justify-center gap-1.5 px-3 py-2 text-[11.5px] font-bold text-white bg-gradient-to-b from-brand-500 to-brand-700 rounded-[9px] shadow-lg disabled:opacity-70"
+            title="Genera variaciones con tu producto real"
           >
             {creando
-              ? <><Loader2 size={10} className="animate-spin" /> Generando…</>
-              : <><Sparkles size={10} /> Crear creativo</>
+              ? <><Loader2 size={12} className="animate-spin" /> Generando…</>
+              : <><Sparkles size={12} /> Crear creativo</>
             }
           </button>
         )}
-        {onAdapt && (
-          <button
-            onClick={(e) => { e.preventDefault(); e.stopPropagation(); onAdapt(); }}
-            disabled={adapting}
-            className="opacity-0 group-hover/thumb:opacity-100 max-md:opacity-100 transition inline-flex items-center justify-center gap-1 px-2 py-1 text-[10px] font-semibold text-white bg-amber-500/90 hover:bg-amber-600 rounded disabled:opacity-70"
-            title="Genera ideas (texto) en la Bandeja"
+        <div className="absolute bottom-1.5 left-1.5 right-1.5 flex items-center justify-center gap-1 opacity-0 group-hover/thumb:opacity-100 max-md:opacity-100 transition">
+          {onAdapt && (
+            <button
+              onClick={(e) => { e.preventDefault(); e.stopPropagation(); onAdapt(); }}
+              disabled={adapting}
+              className="w-7 h-7 grid place-items-center rounded-full text-white bg-white/15 hover:bg-white/30 backdrop-blur disabled:opacity-60"
+              title="Sumar ideas (texto) a la Bandeja"
+            >
+              {adapting ? <Loader2 size={12} className="animate-spin" /> : <Wand2 size={12} />}
+            </button>
+          )}
+          <a
+            href={fbUrl} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()}
+            className="w-7 h-7 grid place-items-center rounded-full text-white bg-white/15 hover:bg-white/30 backdrop-blur"
+            title="Ver en la biblioteca de anuncios de Meta"
           >
-            {adapting
-              ? <><Loader2 size={10} className="animate-spin" /> Adaptando…</>
-              : <><Wand2 size={10} /> + ideas en Bandeja</>
-            }
-          </button>
-        )}
-        <a
-          href={fbUrl} target="_blank" rel="noreferrer"
-          className="opacity-0 group-hover/thumb:opacity-100 max-md:opacity-100 transition inline-flex items-center justify-center gap-1 px-2 py-1 text-[10px] font-semibold text-white bg-black/70 hover:bg-black/90 rounded"
-        >
-          <ExternalLink size={10} /> Ver en FB
-        </a>
-        {/* Guardar en colección (board) — solo aparece cuando el ad es de un
-            competidor (boards requieren competidor_id en el schema). */}
-        {onSaveToBoard && isCompetidor && brandId && (
+            <ExternalLink size={12} />
+          </a>
+          {onSaveToBoard && isCompetidor && brandId && (
+            <button
+              onClick={(e) => { e.preventDefault(); e.stopPropagation(); onSaveToBoard(ad, { id: brandId, nombre: brandNombre }); }}
+              className="w-7 h-7 grid place-items-center rounded-full text-white bg-white/15 hover:bg-white/30 backdrop-blur"
+              title="Guardar en una colección"
+            >
+              <Bookmark size={12} />
+            </button>
+          )}
           <button
-            onClick={(e) => { e.preventDefault(); e.stopPropagation(); onSaveToBoard(ad, { id: brandId, nombre: brandNombre }); }}
-            className="opacity-0 group-hover/thumb:opacity-100 max-md:opacity-100 transition inline-flex items-center justify-center gap-1 px-2 py-1 text-[10px] font-semibold text-white bg-amber-600/90 hover:bg-amber-700 rounded"
-            title="Guardar en una colección cross-producto"
+            onClick={(e) => {
+              e.preventDefault(); e.stopPropagation();
+              window.dispatchEvent(new CustomEvent('viora:toggle-used-ad', { detail: { adId: ad.id } }));
+            }}
+            className={`w-7 h-7 grid place-items-center rounded-full text-white backdrop-blur ${used ? 'bg-gray-500/80 hover:bg-gray-500' : 'bg-white/15 hover:bg-white/30'}`}
+            title={used ? 'Quitar marca de usado' : 'Marcar como usado (queda en gris)'}
           >
-            <Bookmark size={10} /> Guardar
+            <Check size={12} />
           </button>
-        )}
-        {/* Toggle manual de "usado" — persiste por ad.id (Ad Archive ID),
-            sobrevive al re-scrapeo. Gris = ya lo usé. */}
-        <button
-          onClick={(e) => {
-            e.preventDefault(); e.stopPropagation();
-            window.dispatchEvent(new CustomEvent('viora:toggle-used-ad', { detail: { adId: ad.id } }));
-          }}
-          className={`opacity-0 group-hover/thumb:opacity-100 max-md:opacity-100 transition inline-flex items-center justify-center gap-1 px-2 py-1 text-[10px] font-semibold text-white rounded ${
-            used ? 'bg-gray-600 hover:bg-gray-700' : 'bg-emerald-600/90 hover:bg-emerald-700'
-          }`}
-          title={used ? 'Quitar marca de usado' : 'Marcar como usado (queda en gris)'}
-        >
-          <Check size={10} /> {used ? 'Marcado usado' : 'Marcar usado'}
-        </button>
+        </div>
       </div>
       {ad.daysRunning > 0 && (
-        <div className="absolute top-1 left-1 px-1.5 py-0.5 text-[9px] font-bold rounded bg-black/60 text-white pointer-events-none">
-          {ad.daysRunning}d
+        <div className={`absolute bottom-1.5 left-1.5 px-1.5 py-0.5 text-[9.5px] font-bold rounded-full pointer-events-none group-hover/thumb:opacity-0 transition ${
+          ad.daysRunning >= 30 ? 'bg-emerald-400/90 text-emerald-950' : 'bg-black/65 text-white'}`}>
+          {ad.daysRunning} días
         </div>
       )}
       {fresh && !used && (
@@ -1474,7 +1471,7 @@ function TopTableView({ items, seleccionados, selectedOrder, adaptingAdIds, crea
 
 
 
-export default function InspiracionSection({ addToast, forcedProductoId, embedded = false, biblioteca = false }) {
+export default function InspiracionSection({ addToast, forcedProductoId, embedded = false, biblioteca = false, sinDestino = false }) {
   // Refs de cleanup — guards contra setState en componente desmontado,
   // doble-click en bulk generate, y setTimeouts sin cancel al unmount.
   // Sin esto se filtraban warnings de React + memoria de timeouts colgados
@@ -1605,6 +1602,10 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
   // mueve ningún dato: cada marca sigue guardada en el producto donde se
   // cargó, y lo que se genera va al producto elegido en "Generar para".
   const [ajenas, setAjenas] = useState([]);
+  // Filtros en chips de la biblioteca (prototipo 2A): de qué producto vino la
+  // marca y solo anuncios que ya llevan +30 días activos (probados).
+  const [origenFiltro, setOrigenFiltro] = useState('todas');
+  const [min30, setMin30] = useState(false);
   const otrosKey = biblioteca ? productos.filter(p => String(p.id) !== String(activeProductoId))
     .map(p => `${p.id}:${(p.competidores || []).length}`).join('|') : '';
   useEffect(() => {
@@ -1613,7 +1614,7 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
     (async () => {
       const out = [];
       for (const p of productos) {
-        if (String(p.id) === String(activeProductoId)) continue;
+        if (String(p.id) === String(activeProductoId) || !productoVisible(p)) continue;
         const origen = p.nombre || 'otro producto';
         for (const c of (p.competidores || [])) {
           const rec = await getCompAds(p.id, c.id);
@@ -2150,6 +2151,8 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
   };
 
   const handleAdapt = async (brandNombre, ad) => {
+    // Biblioteca sin producto elegido: se puede mirar y elegir, no generar.
+    if (sinDestino) { addToast?.({ type: 'info', message: 'Primero elegí arriba para qué producto querés generar.' }); return; }
     if (!producto) return;
     setAdaptingAdIds(prev => new Set(prev).add(ad.id));
     const execId = startExecution({
@@ -2284,6 +2287,8 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
   };
 
   const crearReferencialDeAd = async (brandNombre, ad, { skipCategoryWarn = false, silentExecution = false, planPrecargado = null } = {}) => {
+    // Biblioteca sin producto elegido: se puede mirar y elegir, no generar.
+    if (sinDestino) { addToast?.({ type: 'info', message: 'Primero elegí arriba para qué producto querés generar.' }); return; }
     if (!producto) return false;
     // RED DE SEGURIDAD (bug Femflora): si el ad de referencia parece de otra
     // categoría (pies/uñas/cara) que el producto (íntimo/etc.), avisamos ANTES
@@ -2677,6 +2682,8 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
   // poblar la Bandeja con ideas inspiradas en los winners de la
   // competencia antes de decidir cuáles vale la pena generar.
   const handleBulkAdapt = async () => {
+    // Biblioteca sin producto elegido: se puede mirar y elegir, no generar.
+    if (sinDestino) { addToast?.({ type: 'info', message: 'Primero elegí arriba para qué producto querés generar.' }); return; }
     if (bulkAdaptingRef.current) {
       addToast?.({ type: 'info', message: 'Ya hay un bulk adapt corriendo. Esperá a que termine.' });
       return;
@@ -2760,6 +2767,8 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
   };
 
   const handleBulkCrear = async () => {
+    // Biblioteca sin producto elegido: se puede mirar y elegir, no generar.
+    if (sinDestino) { addToast?.({ type: 'info', message: 'Primero elegí arriba para qué producto querés generar.' }); return; }
     // Guard contra doble-click. Sin esto, dos workers procesaban el mismo
     // index del queue por race en nextIndex → ads generados 2x o skipped.
     if (bulkRunningRef.current) {
@@ -3907,7 +3916,7 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
           if (n && compNombres.has(n)) return false;
           return true;
         });
-        let unif = [...competidoresUnif, ...customDeduped];
+        let unif = [...competidoresUnif, ...customDeduped].map(b => (biblioteca ? { ...b, __origen: b.__origen || producto.nombre } : b));
         if (biblioteca && ajenas.length) {
           const hostDe = (u) => (u || '').replace(/^https?:\/\//, '').replace(/^www\./, '').split('/')[0];
           const vistos = new Set(unif.flatMap(b => [hostDe(b.landingUrl), (b.nombre || '').toLowerCase().trim()]).filter(Boolean));
@@ -3924,6 +3933,12 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
           }
         }
 
+        // Chips de la biblioteca: origen y +30 días
+        if (biblioteca && origenFiltro !== 'todas') unif = unif.filter(b => b.__origen === origenFiltro);
+        if (biblioteca && min30) {
+          unif = unif.map(b => ({ ...b, __ads: (b.__ads || []).filter(a => (a.daysRunning || 0) >= 30) }))
+            .filter(b => b.__ads.length > 0);
+        }
         // Filtros
         if (tipoFiltro === 'competidor') unif = unif.filter(b => b.isCompetidor);
         else if (tipoFiltro === 'custom') unif = unif.filter(b => !b.isCompetidor);
@@ -4003,6 +4018,29 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
                 })}
               />
             )}
+
+            {biblioteca && (() => {
+              const origenes = [...new Set([producto.nombre, ...ajenas.map(f => f.origen)].filter(Boolean))];
+              const chip = (on) => `px-3.5 py-1.5 rounded-full border text-[12.5px] font-semibold transition ${on
+                ? 'bg-brand-500/15 border-brand-500 text-brand-300'
+                : 'border-[rgba(130,180,255,0.22)] text-gray-300 hover:bg-brand-500/10'}`;
+              return (
+                <div className="flex flex-wrap items-center gap-2">
+                  <button className={chip(origenFiltro === 'todas')} onClick={() => setOrigenFiltro('todas')}>Todas las marcas</button>
+                  {origenes.map(o => (
+                    <button key={o} className={chip(origenFiltro === o)} onClick={() => setOrigenFiltro(origenFiltro === o ? 'todas' : o)}
+                      title={`Marcas cargadas en ${o}`}>
+                      De {o}
+                    </button>
+                  ))}
+                  <span className="w-px h-5 bg-gray-700 mx-1" />
+                  <button className={chip(min30)} onClick={() => setMin30(v => !v)}
+                    title="Solo anuncios que ya llevan 30 días o más activos: los que más probablemente venden">
+                    +30 días activo
+                  </button>
+                </div>
+              );
+            })()}
 
             {/* Toolbar consolidada (Stripe/Linear) — search + filtros + counter + acciones
                 en una sola línea. Reemplaza la antigua barra de filtros + los botones

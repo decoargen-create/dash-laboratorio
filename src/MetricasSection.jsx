@@ -48,6 +48,7 @@ import { referenciasApi } from './referenciasApi.js';
 import { fetchMeta, leerCacheMeta, pathTestingInsights, pathAdsWithInsights, recordarConnId } from './metricasCache.js';
 import { VistaEmbudo } from './EmbudoVista.jsx';
 import { cambiarEstado, cambiarPresupuesto, inverso, estadoVisible, entregaDe } from './testeosAcciones.js';
+import { soloVisibles } from './productosVisibles.js';
 import { deriveFunnelRates } from '../api/meta/_funnel.js';
 
 // Las claves siguen diciendo "testeos" a propósito: renombrarlas le borraría
@@ -113,7 +114,7 @@ function etiquetaVentana(valor, presets) {
 }
 
 function readProductos() {
-  try { return JSON.parse(localStorage.getItem('adslab-marketing-productos-v1') || '[]'); }
+  try { return soloVisibles(JSON.parse(localStorage.getItem('adslab-marketing-productos-v1') || '[]')); }
   catch { return []; }
 }
 

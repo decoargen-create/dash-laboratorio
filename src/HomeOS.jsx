@@ -22,12 +22,13 @@ import {
 import { supabase } from './supabase.js';
 import { MetaConnectButton } from './MetaConnect.jsx';
 import { entregasNuevas } from './produccionStore.js';
+import { soloVisibles } from './productosVisibles.js';
 import CreativaDashboard from './CreativaDashboard.jsx';
 
 const PRODUCTOS_KEY = 'adslab-marketing-productos-v1';
 
 function readProductos() {
-  try { return JSON.parse(localStorage.getItem(PRODUCTOS_KEY) || '[]'); } catch { return []; }
+  try { return soloVisibles(JSON.parse(localStorage.getItem(PRODUCTOS_KEY) || '[]')); } catch { return []; }
 }
 async function authHeaders() {
   const base = { 'Content-Type': 'application/json' };

@@ -26,6 +26,7 @@ import {
   productoDeCampana, linkMeta, FORMULAS,
   fusionarConFotos, cohortesParaCongelar, fotoDeCohorte,
 } from './testeosCore.js';
+import { soloVisibles } from './productosVisibles.js';
 import { cargarCfg, guardarCfg, cargarFotos, guardarFotos, leerCfgLocal } from './testeosStore.js';
 
 const LS_ACCOUNT = 'adslab-testeos-account';
@@ -40,7 +41,7 @@ const PRESETS = [
 ];
 
 function readProductos() {
-  try { return JSON.parse(localStorage.getItem('adslab-marketing-productos-v1') || '[]'); }
+  try { return soloVisibles(JSON.parse(localStorage.getItem('adslab-marketing-productos-v1') || '[]')); }
   catch { return []; }
 }
 

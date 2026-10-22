@@ -2,7 +2,7 @@
 // leyendo su landing (texto + foto principal). Lo usa el alta de producto
 // (Estáticos → Nueva carga, paso "Formato") para completarlo solo.
 //
-// POST { nombre, landingUrl } → { formato, medidas, motivo, cost }
+// POST { nombre, landingUrl } → { formato, medidas, ofertas, imagenUrl, motivo, cost }
 // `formato` es siempre una de las claves de FORMATOS (las mismas del select
 // del front) o '' si no se pudo decidir.
 
@@ -97,7 +97,7 @@ export default async function handler(req, res) {
   if (!nombre && !landingUrl) return respondJSON(res, 400, { error: 'Falta el nombre o la URL de la landing' });
 
   // Leer la landing (si no se puede, se decide solo con el nombre).
-  let titulo = '', descripcion = '', texto = '', imagen = null;
+  let titulo = '', descripcion = '', texto = '', imagen = null, imagenUrl = '';
   if (/^https?:\/\//i.test(landingUrl)) {
     try {
       const r = await safeFetch(landingUrl, { headers: { 'User-Agent': 'Mozilla/5.0 (Kombialo)' } }, { timeoutMs: 10000 });
@@ -107,7 +107,7 @@ export default async function handler(req, res) {
         descripcion = meta(html, 'og:description') || meta(html, 'description');
         texto = textoDeLanding(html);
         const og = meta(html, 'og:image');
-        if (og) imagen = await imagenBase64(new URL(og, landingUrl).href);
+        if (og) { imagenUrl = new URL(og, landingUrl).href; imagen = await imagenBase64(imagenUrl); }
       }
     } catch { /* landing caída o bloqueada: seguimos con el nombre */ }
   }
@@ -127,6 +127,7 @@ Reglas:
 - Basate en el producto que se vende (la foto, si está, manda), no en lo que se promete.
 - Si la página no alcanza para saberlo, devolvé formato "" en vez de adivinar.
 - "medidas": el tamaño real del producto si la página lo dice (alto, largo, diámetro, ml, g, cm), en una frase corta en español rioplatense y comparándolo con algo cotidiano si se puede (ej: "13 cm de largo, entra en la palma de la mano"). Si la página no lo dice, "".
+- "ofertas": las ofertas REALES que muestra la página, tal cual: precio (con moneda), descuentos, promos (2x1, combos), envío gratis, cuotas, garantía. Una por línea, sin inventar nada. Si no hay, "".
 - "motivo": una frase corta en español explicando qué te hizo elegir ese formato.`;
 
   const content = [];
@@ -148,9 +149,10 @@ Reglas:
             properties: {
               formato: { type: 'string', enum: ['', ...Object.keys(FORMATOS)] },
               medidas: { type: 'string' },
+              ofertas: { type: 'string' },
               motivo: { type: 'string' },
             },
-            required: ['formato', 'medidas', 'motivo'],
+            required: ['formato', 'medidas', 'ofertas', 'motivo'],
             additionalProperties: false,
           },
         },
@@ -166,6 +168,8 @@ Reglas:
     return respondJSON(res, 200, {
       formato,
       medidas: String(out.medidas || '').slice(0, 200),
+      ofertas: String(out.ofertas || '').slice(0, 600),
+      imagenUrl,
       motivo: String(out.motivo || '').slice(0, 300),
       leyoLanding: !!texto,
       vioFoto: !!imagen,

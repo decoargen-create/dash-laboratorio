@@ -117,7 +117,7 @@ import TranscripcionVideosSection from './TranscripcionVideosSection.jsx';
 import ReferenciasSection from './ReferenciasSection.jsx';
 import PublicarCampanaModal, { leerPresetPublicar } from './PublicarCampanaModal.jsx';
 import { usePipelineRun } from './PipelineRunContext.jsx';
-import { getProductoImagen } from './productoImagen.js';
+import { getProductoImagen, setProductoImagen, comprimirImagen } from './productoImagen.js';
 import { setCompAds, getCompAds, hydrateCompetidoresAds, removeCompAds } from './competidorAdsIDB.js';
 import { stringifyApiError } from './apiHelpers.js';
 import { trackQuotaFailure, isQuotaError, removeFromQuotaQueue } from './quotaRetryStore.js';
@@ -621,12 +621,14 @@ function RunHistoryCard({ history, onClear }) {
 // Bandeja. Colapsada por defecto como un pill chico para no sumar ruido
 // ("demasiada info"): el user la abre solo si la necesita. El estado
 // abierto/cerrado se persiste.
+// La generación de ideas (pipeline → Bandeja) queda oculta por ahora: el foco
+// es crear estáticos desde Inspiración. Para volver a mostrarla, poner true.
+const MOSTRAR_IDEAS = false;
+
 const FLOW_STEPS = [
-  { emoji: '⚙️', tab: null, titulo: 'Nueva carga', desc: 'En Estáticos → Nueva carga: cargás el producto (foto, oferta, formato) y sus competidores.' },
-  { emoji: '▶️', tab: null, titulo: 'Analizar y generar ideas', desc: 'Miramos los anuncios ganadores de tu competencia y te armamos ideas.' },
-  { emoji: '📥', tab: 'bandeja', titulo: 'Bandeja', desc: 'Revisás cada idea y generás el creativo ahí mismo.' },
-  { emoji: '✨', tab: null, titulo: 'Inspiración', desc: 'En Estáticos → Inspiración: elegís anuncios de referencia de cualquier marca y generás para el producto que quieras.' },
-  { emoji: '🖼️', tab: null, titulo: 'Galería', desc: 'En Estáticos → Galería: los estáticos generados de cada producto, listos para descargar.' },
+  { emoji: '⚙️', tab: null, titulo: 'Nueva carga', desc: 'En Estáticos → Nueva carga: cargás el producto, su foto, formato y ofertas (la IA lee tu landing y completa lo que puede).' },
+  { emoji: '✨', tab: null, titulo: 'Inspiración', desc: 'En Estáticos → Inspiración: elegís anuncios que funcionan, de cualquier marca, y creás los estáticos para tu producto.' },
+  { emoji: '🖼️', tab: null, titulo: 'Galería', desc: 'En Estáticos → Galería: tus estáticos, listos para descargar o mandar al Publicador.' },
 ];
 
 function FlowGuide() {
@@ -653,7 +655,7 @@ function FlowGuide() {
       >
         <span className="shrink-0">🗺️</span>
         <span className="flex-1 min-w-0 text-[12px] font-bold text-brand-800 dark:text-brand-200">
-          ¿Cómo funciona? <span className="font-normal text-brand-600/80 dark:text-brand-400/80">— guía rápida del flujo en 5 pasos</span>
+          ¿Cómo funciona? <span className="font-normal text-brand-600/80 dark:text-brand-400/80">— guía rápida en {FLOW_STEPS.length} pasos</span>
         </span>
         <ChevronDown size={14} className={`shrink-0 text-brand-500 transition-transform ${open ? 'rotate-180' : ''}`} />
       </button>
@@ -1454,11 +1456,17 @@ export default function ArranqueSection({ addToast, onGoToSection, modoAlta = fa
   useEffect(() => {
     try { localStorage.setItem('adslab-productos-vista', vista); } catch {}
   }, [vista]);
-  const [prodDraft, setProdDraft] = useState({ nombre: '', landingUrl: '', descripcion: '', formato: '', medidas: '', claves: '' });
+  const [prodDraft, setProdDraft] = useState({ nombre: '', landingUrl: '', descripcion: '', formato: '', medidas: '', claves: '', ofertas: '' });
   // Wizard de ALTA de producto (Kombialo OS, etapa 1): el producto nace
   // enchufado — cuenta publicitaria, campaña base de referencia, break-even
   // y primeros competidores, todo en el alta en vez de configurarse después.
   const [wizPaso, setWizPaso] = useState(1);
+  // ID reservado para el producto que se está dando de alta: la foto se guarda
+  // con ese ID antes de crearlo (paso Foto) y el producto nace con el mismo.
+  const nuevoIdProducto = () => `prod-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+  const [draftId, setDraftId] = useState(nuevoIdProducto);
+  const [fotoVersion, setFotoVersion] = useState(0);
+  const [usandoFotoLanding, setUsandoFotoLanding] = useState(false);
   // Detección del formato con IA (paso 2 del alta): { estado: 'idle'|'leyendo'|'listo'|'error', motivo }
   const [detFormato, setDetFormato] = useState({ estado: 'idle', motivo: '' });
   const detectarFormato = async (draft) => {
@@ -1474,8 +1482,10 @@ export default function ArranqueSection({ addToast, onGoToSection, modoAlta = fa
       });
       const j = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(j.error || `Error ${r.status}`);
-      setProdDraft(prev => ({ ...prev, formato: j.formato || prev.formato, medidas: prev.medidas.trim() ? prev.medidas : (j.medidas || '') }));
-      setDetFormato({ estado: 'listo', motivo: j.formato ? (j.motivo || '') : 'No me alcanzó la página para saberlo: elegilo vos.' });
+      setProdDraft(prev => ({ ...prev, formato: j.formato || prev.formato,
+        medidas: prev.medidas.trim() ? prev.medidas : (j.medidas || ''),
+        ofertas: prev.ofertas.trim() ? prev.ofertas : (j.ofertas || '') }));
+      setDetFormato({ estado: 'listo', motivo: j.formato ? (j.motivo || '') : 'No me alcanzó la página para saberlo: elegilo vos.', imagenUrl: j.imagenUrl || '', ofertasIA: !!j.ofertas });
     } catch (e) {
       setDetFormato({ estado: 'error', motivo: e.message || 'No pude analizar el producto.' });
     }
@@ -1502,8 +1512,23 @@ export default function ArranqueSection({ addToast, onGoToSection, modoAlta = fa
   // Desde el setup (Nueva carga), los atajos a otras pestañas abren el
   // producto en Productos con esa pestaña.
   const irATab = (t) => { setProductoTab(t); if (modoAlta) setTimeout(() => onGoToSection?.('mk-arranque'), 0); };
+  const usarFotoLanding = async () => {
+    if (!detFormato.imagenUrl) return;
+    setUsandoFotoLanding(true);
+    try {
+      const r = await fetch(`/api/marketing/proxy-image?url=${encodeURIComponent(detFormato.imagenUrl)}`);
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const blob = await r.blob();
+      const archivo = new File([blob], 'foto-landing', { type: blob.type || 'image/jpeg' });
+      await setProductoImagen(draftId, await comprimirImagen(archivo));
+      setFotoVersion(v => v + 1);
+    } catch (e) {
+      addToast?.({ type: 'error', message: `No pude traer la foto de la landing (${e.message}). Subila a mano.` });
+    } finally { setUsandoFotoLanding(false); }
+  };
   const resetWizard = () => {
-    setDetFormato({ estado: 'idle', motivo: '' }); setWizPaso(1); setWizCx({ accountId: '', accountName: '', currency: '', connId: null, campanaBaseId: '', campanaBaseName: '', breakEven: '1.60', comp1: '', comp2: '' }); setWizCampanas([]); };
+    setDetFormato({ estado: 'idle', motivo: '' });
+    setDraftId(nuevoIdProducto()); setWizPaso(1); setWizCx({ accountId: '', accountName: '', currency: '', connId: null, campanaBaseId: '', campanaBaseName: '', breakEven: '1.60', comp1: '', comp2: '' }); setWizCampanas([]); };
   const cargarCampanasWizard = async (accId, connId) => {
     setWizCampanas([]);
     if (!accId) return;
@@ -1879,7 +1904,8 @@ export default function ArranqueSection({ addToast, onGoToSection, modoAlta = fa
     if (!nombre) { addToast?.({ type: 'error', message: 'Ponele nombre al producto' }); return; }
 
     // Suffix random — antes era solo Date.now() que colisiona en double-click.
-    const nuevoId = `prod-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+    // El ID reservado al abrir el alta: la foto ya quedó guardada con él.
+    const nuevoId = draftId;
     // Competidores iniciales del wizard: nombre inferido del dominio.
     const comps = [wizCx.comp1, wizCx.comp2].map(s => s.trim()).filter(Boolean).map((url, i) => {
       let nom = url;
@@ -1897,6 +1923,7 @@ export default function ArranqueSection({ addToast, onGoToSection, modoAlta = fa
       descripcion: prodDraft.descripcion.trim(),
       ...(prodDraft.formato ? { formato: prodDraft.formato } : {}),
       ...(prodDraft.medidas.trim() ? { medidas: prodDraft.medidas.trim() } : {}),
+      ...(prodDraft.ofertas.trim() ? { ofertasReales: prodDraft.ofertas.trim() } : {}),
       ...(prodDraft.claves.trim() ? { palabrasClave: prodDraft.claves.split(',').map(x => x.trim()).filter(Boolean) } : {}),
       competidores: comps,
       createdAt: new Date().toISOString(),
@@ -1911,7 +1938,7 @@ export default function ArranqueSection({ addToast, onGoToSection, modoAlta = fa
     if (Number.isFinite(be) && be > 0) nuevo.breakEven = be;
 
     setProductos(prev => [nuevo, ...prev]);
-    setProdDraft({ nombre: '', landingUrl: '', descripcion: '', formato: '', medidas: '', claves: '' });
+    setProdDraft({ nombre: '', landingUrl: '', descripcion: '', formato: '', medidas: '', claves: '', ofertas: '' });
     resetWizard();
     setShowProdForm(false);
     setActiveProductoId(String(nuevoId));
@@ -3322,7 +3349,7 @@ export default function ArranqueSection({ addToast, onGoToSection, modoAlta = fa
             <div className="flex items-center gap-3 flex-wrap">
               <h3 className="text-sm font-bold text-gray-900 dark:text-gray-100">Nuevo producto</h3>
               <div className="flex gap-1.5 ml-auto">
-                {[[1, 'El producto'], [2, 'Formato'], [3, 'Conexiones'], [4, 'Competencia']].map(([n, lbl]) => (
+                {[[1, 'El producto'], [2, 'Foto'], [3, 'Formato'], [4, 'Ofertas'], [5, 'Conexiones']].map(([n, lbl]) => (
                   <span key={n} className={`inline-flex items-center gap-1.5 text-[10.5px] font-bold px-2.5 py-1 rounded-full border ${
                     wizPaso === n ? 'border-brand-500 bg-brand-50 dark:bg-brand-900/30 text-brand-700 dark:text-brand-300'
                       : wizPaso > n ? 'border-emerald-300 dark:border-emerald-800 text-emerald-600 dark:text-emerald-400'
@@ -3348,6 +3375,25 @@ export default function ArranqueSection({ addToast, onGoToSection, modoAlta = fa
             )}
 
             {wizPaso === 2 && (
+              <div className="space-y-3">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400 block">Foto del producto</span>
+                <p className="text-[11px] text-gray-400 -mt-1">El envase real, idealmente con fondo blanco: es la que va a aparecer en todos tus creativos.</p>
+                {detFormato.imagenUrl && (
+                  <div className="flex items-center gap-3 rounded-lg border border-brand-500/30 bg-brand-500/5 p-2.5">
+                    <img src={`/api/marketing/proxy-image?url=${encodeURIComponent(detFormato.imagenUrl)}`} alt="" className="w-14 h-14 rounded-md object-cover bg-white" />
+                    <span className="flex-1 text-[12px] text-gray-300">Encontré esta foto en tu landing.</span>
+                    <button type="button" onClick={usarFotoLanding} disabled={usandoFotoLanding}
+                      className="px-3 py-1.5 text-xs font-bold text-white bg-gradient-to-br from-brand-500 to-brand-700 rounded-md disabled:opacity-60">
+                      {usandoFotoLanding ? 'Trayendo…' : 'Usar esta'}
+                    </button>
+                  </div>
+                )}
+                {detFormato.estado === 'leyendo' && <p className="text-[11.5px] text-gray-400 inline-flex items-center gap-1.5"><Loader2 size={11} className="animate-spin" /> Buscando la foto en tu landing…</p>}
+                <ProductoImagenUploader key={`${draftId}-${fotoVersion}`} productoId={draftId} addToast={addToast} />
+              </div>
+            )}
+
+            {wizPaso === 3 && (
               <div className="space-y-3">
                 <div>
                   <div className="flex items-center justify-between gap-2 mb-1">
@@ -3379,7 +3425,18 @@ export default function ArranqueSection({ addToast, onGoToSection, modoAlta = fa
               </div>
             )}
 
-            {wizPaso === 3 && (
+            {wizPaso === 4 && (
+              <div className="space-y-3">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400 block">Tus ofertas reales</span>
+                <p className="text-[11px] text-gray-400 -mt-1">Precio, promos, envío gratis, cuotas: van tal cual en los creativos, en lugar de las ofertas del anuncio de referencia. Si lo dejás vacío, no se inventa ninguna.</p>
+                {detFormato.ofertasIA && <p className="text-[11.5px] rounded-md px-2.5 py-1.5 text-brand-300 bg-brand-500/10">Kombi: las saqué de tu landing. Revisalas antes de seguir.</p>}
+                <textarea value={prodDraft.ofertas} onChange={e => setProdDraft({ ...prodDraft, ofertas: e.target.value })} rows={4}
+                  placeholder={'ej:\n$29.900 con envío gratis\nHASTA 30% OFF\n3 cuotas sin interés'}
+                  className="w-full px-2.5 py-1.5 text-sm bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-brand-500 resize-y" />
+              </div>
+            )}
+
+            {wizPaso === 5 && (
               <div className="space-y-3">
                 <div>
                   <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400 block mb-1">Palabras clave de las campañas</span>
@@ -3436,7 +3493,7 @@ export default function ArranqueSection({ addToast, onGoToSection, modoAlta = fa
               </div>
             )}
 
-            {wizPaso === 4 && (
+            {false && wizPaso === 6 && (
               <div className="space-y-3">
                 <div>
                   <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400 block mb-1">Competidores a monitorear · opcional</span>
@@ -3460,7 +3517,7 @@ export default function ArranqueSection({ addToast, onGoToSection, modoAlta = fa
             )}
 
             <div className="flex gap-2 justify-end">
-              <button onClick={() => { setShowProdForm(false); setProdDraft({ nombre: '', landingUrl: '', descripcion: '', formato: '', medidas: '', claves: '' }); resetWizard(); }}
+              <button onClick={() => { setShowProdForm(false); setProdDraft({ nombre: '', landingUrl: '', descripcion: '', formato: '', medidas: '', claves: '', ofertas: '' }); resetWizard(); }}
                 className="px-3 py-1.5 text-xs font-semibold text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md hover:bg-gray-50 transition">
                 Cancelar
               </button>
@@ -3470,12 +3527,12 @@ export default function ArranqueSection({ addToast, onGoToSection, modoAlta = fa
                   ← Atrás
                 </button>
               )}
-              {wizPaso < 4 ? (
+              {wizPaso < 5 ? (
                 <button onClick={() => {
                   if (wizPaso === 1 && !prodDraft.nombre.trim()) { addToast?.({ type: 'error', message: 'Ponele nombre al producto' }); return; }
                   if (wizPaso === 1 && !prodDraft.formato) detectarFormato(prodDraft);
-                  if (wizPaso === 2 && metaConnected && availableAccounts.length === 0 && !loadingAccounts) loadAdAccounts();
-                  if (wizPaso === 2 && !prodDraft.claves.trim()) {
+                  if (wizPaso === 4 && metaConnected && availableAccounts.length === 0 && !loadingAccounts) loadAdAccounts();
+                  if (wizPaso === 4 && !prodDraft.claves.trim()) {
                     const primera = prodDraft.nombre.trim().split(/\s+/).find(w => w.length >= 4) || '';
                     if (primera) setProdDraft(d => ({ ...d, claves: primera.toLowerCase() }));
                   }
@@ -4156,8 +4213,9 @@ export default function ArranqueSection({ addToast, onGoToSection, modoAlta = fa
 
       {modoAlta && <>
 
-      {/* Nudge de auto-run: si pasaron > 24h y el user no está corriendo ahora */}
-      {ofrecerRun && (
+      {/* Nudge de auto-run: si pasaron > 24h y el user no está corriendo ahora.
+          Oculto por ahora junto con la generación de ideas (foco en estáticos). */}
+      {MOSTRAR_IDEAS && ofrecerRun && (
         <div className="px-4 py-3 bg-gradient-to-br from-brand-50 to-brand-100 dark:from-brand-900/20 dark:to-brand-950/20 border border-brand-200 dark:border-brand-800 rounded-lg flex items-center gap-3">
           <div className="shrink-0 w-8 h-8 rounded-lg bg-gradient-to-br from-brand-400 to-brand-600 flex items-center justify-center text-white">
             <Sparkles size={14} />
@@ -4323,7 +4381,7 @@ export default function ArranqueSection({ addToast, onGoToSection, modoAlta = fa
               No te pedimos stage (problem/solution/product-aware) porque lo inferimos solos del research doc cuando corras el pipeline.
             </p>
             <div className="flex gap-2 justify-end">
-              <button onClick={() => { setShowProdForm(false); setProdDraft({ nombre: '', landingUrl: '', descripcion: '', formato: '', medidas: '', claves: '' }); }}
+              <button onClick={() => { setShowProdForm(false); setProdDraft({ nombre: '', landingUrl: '', descripcion: '', formato: '', medidas: '', claves: '', ofertas: '' }); }}
                 className="px-3 py-1.5 text-xs font-semibold text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md hover:bg-gray-50 transition">
                 Cancelar
               </button>
@@ -4790,8 +4848,9 @@ export default function ArranqueSection({ addToast, onGoToSection, modoAlta = fa
         )}
       </WizardCard>
 
-      {/* Paso 4 — Correr pipeline */}
-      <WizardCard
+      {/* Paso 4 — Correr pipeline (generación de ideas): oculto por ahora,
+          pedido 22/10 — el foco es estáticos, y la competencia no los alimenta. */}
+      {MOSTRAR_IDEAS && <WizardCard
         num="4"
         title="Analizar y generar ideas"
         done={false}
@@ -5025,7 +5084,7 @@ export default function ArranqueSection({ addToast, onGoToSection, modoAlta = fa
             </ul>
           </div>
         )}
-      </WizardCard>
+      </WizardCard>}
 
       {/* Historial de corridas del producto activo — persistido. */}
       <RunHistoryCard

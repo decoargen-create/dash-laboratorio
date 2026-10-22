@@ -26,7 +26,7 @@ import { confirmDialog } from './dialogs.jsx';
 import {
   Sparkles, Package, ChevronRight, ChevronDown, Plus, Trash2, Link2, X,
   Loader2, Download, Image as ImageIcon, ExternalLink, Wand2, Search,
-  Check, AlertCircle, LayoutGrid, Rows3, Table2, Settings2, RefreshCw,
+  Check, AlertCircle, LayoutGrid, Rows3, Columns3, Table2, Settings2, RefreshCw,
   Inbox, Bookmark,
 } from 'lucide-react';
 import { logCostsFromResponse } from './costsStore.js';
@@ -629,12 +629,7 @@ function BrandCard({ brand, ads, isScraping, adaptingAdIds, creandoAdIds, selecc
                 comp
               </span>
             )}
-            {brand.__origen && (
-              <span className="px-1.5 py-px text-[9px] font-semibold bg-gray-100 dark:bg-gray-700/70 text-gray-500 dark:text-gray-300 rounded shrink-0 truncate max-w-[120px]"
-                title={`Cargada en ${brand.__origen}`}>
-                de {brand.__origen}
-              </span>
-            )}
+
             {(() => {
               // Badge "estable" — marcas que el smart scrape va a saltear porque
               // devolvieron 0 ads nuevos 3 veces seguidas. El user puede forzar
@@ -655,6 +650,11 @@ function BrandCard({ brand, ads, isScraping, adaptingAdIds, creandoAdIds, selecc
             })()}
           </div>
           <div className="flex items-center gap-1.5 text-[10px] text-gray-500 dark:text-gray-400 truncate">
+            {brand.__origen && (
+              <span className="shrink-0 px-1.5 py-px font-semibold bg-gray-100 dark:bg-gray-700/70 text-gray-500 dark:text-gray-300 rounded" title={`Cargada en ${brand.__origen}`}>
+                de {brand.__origen}
+              </span>
+            )}
             {brand.landingUrl && (
               <a href={brand.landingUrl} target="_blank" rel="noreferrer"
                 className="inline-flex items-center gap-0.5 text-brand-600 hover:underline truncate">
@@ -1006,6 +1006,9 @@ function AdThumb({ ad, brandNombre, brandId = null, isCompetidor = false, fresh 
 
 
 const VistaCarrilCtx = React.createContext(false);
+// Biblioteca general: última carga de las fuentes de TODOS los productos.
+// Vive a nivel módulo para que cambiar "Crear para" no la vacíe y recargue.
+let bibliotecaCache = { key: '', fuentes: [] };
 const CARRIL_CLS = 'flex gap-2 overflow-x-auto pb-2 snap-x [&>*]:w-[180px] [&>*]:shrink-0 [&>*]:snap-start';
 
 function BrandAdsGrid({ ads, brandNombre, brandId = null, isCompetidor = false, adaptingAdIds, creandoAdIds, seleccionados, selectedOrder, usedAdIds, progressById, onAdapt, onCrearReferencial, onToggleSelect, onSaveToBoard, onClearProgress, onScrape, isScraping, brandTotalAds }) {
@@ -1605,7 +1608,14 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
   // producto elegido, se muestran las de TODOS los otros productos. No se
   // mueve ningún dato: cada marca sigue guardada en el producto donde se
   // cargó, y lo que se genera va al producto elegido en "Generar para".
-  const [ajenas, setAjenas] = useState([]);
+  // Fuentes de TODOS los productos visibles (incluido el elegido), cargadas
+  // de una sola vez y en paralelo: la biblioteca es la misma elija el
+  // producto que elija. Las del producto elegido se reemplazan después por
+  // sus versiones "vivas" (re-scrape, borrar) al armar la lista.
+  const bibKey = biblioteca ? productos.filter(productoVisible)
+    .map(p => `${p.id}:${(p.competidores || []).map(c => c.id).join(',')}:${loadBrands(p.id).length}`).join('|') : '';
+  const [ajenas, setAjenas] = useState(() => (biblioteca && bibliotecaCache.key === bibKey ? bibliotecaCache.fuentes : []));
+  const [cargandoBiblio, setCargandoBiblio] = useState(false);
   // Filtros en chips de la biblioteca (prototipo 2A): de qué producto vino la
   // marca y solo anuncios que ya llevan +30 días activos (probados).
   const [origenFiltro, setOrigenFiltro] = useState('todas');
@@ -1614,32 +1624,33 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
   });
   useEffect(() => { try { localStorage.setItem('adslab-inspiracion-vista', vistaMarcas); } catch { /* sin storage */ } }, [vistaMarcas]);
   const [min30, setMin30] = useState(false);
-  const otrosKey = biblioteca ? productos.filter(p => String(p.id) !== String(activeProductoId))
-    .map(p => `${p.id}:${(p.competidores || []).length}`).join('|') : '';
   useEffect(() => {
     if (!biblioteca) { setAjenas([]); return; }
+    if (bibliotecaCache.key === bibKey && bibliotecaCache.fuentes.length) { setAjenas(bibliotecaCache.fuentes); return; }
     let cancelled = false;
+    setCargandoBiblio(true);
     (async () => {
-      const out = [];
-      for (const p of productos) {
-        if (String(p.id) === String(activeProductoId) || !productoVisible(p)) continue;
+      const porProducto = await Promise.all(productos.filter(productoVisible).map(async (p) => {
         const origen = p.nombre || 'otro producto';
-        for (const c of (p.competidores || [])) {
-          const rec = await getCompAds(p.id, c.id);
-          out.push({ key: `x-${p.id}-c-${c.id}`, nombre: c.nombre, landingUrl: c.landingUrl, fbPageUrl: c.fbPageUrl,
-            lastScraped: c.lastAdsCheck, isCompetidor: true, origen, ads: rec?.ads?.length ? rec.ads : (c.ads || []) });
-        }
-        for (const b of loadBrands(p.id)) {
-          const rec = await getCompAds(p.id, `brand-${b.id}`);
-          out.push({ key: `x-${p.id}-b-${b.id}`, nombre: b.nombre, landingUrl: b.landingUrl, fbPageUrl: b.fbPageUrl,
-            lastScraped: b.lastScraped, isCompetidor: false, origen, ads: rec?.ads || [] });
-        }
-      }
-      if (!cancelled) setAjenas(out);
+        const comps = await Promise.all((p.competidores || []).map(async (c) => {
+          const rec = await getCompAds(p.id, c.id).catch(() => null);
+          return { key: `x-${p.id}-c-${c.id}`, prodId: String(p.id), srcId: `comp-${c.id}`, nombre: c.nombre, landingUrl: c.landingUrl, fbPageUrl: c.fbPageUrl,
+            lastScraped: c.lastAdsCheck, isCompetidor: true, origen, ads: rec?.ads?.length ? rec.ads : (c.ads || []) };
+        }));
+        const marcas = await Promise.all(loadBrands(p.id).map(async (b) => {
+          const rec = await getCompAds(p.id, `brand-${b.id}`).catch(() => null);
+          return { key: `x-${p.id}-b-${b.id}`, prodId: String(p.id), srcId: b.id, nombre: b.nombre, landingUrl: b.landingUrl, fbPageUrl: b.fbPageUrl,
+            lastScraped: b.lastScraped, isCompetidor: false, origen, ads: rec?.ads || [] };
+        }));
+        return [...comps, ...marcas];
+      }));
+      const fuentes = porProducto.flat();
+      bibliotecaCache = { key: bibKey, fuentes };
+      if (!cancelled) { setAjenas(fuentes); setCargandoBiblio(false); }
     })();
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [biblioteca, activeProductoId, otrosKey]);
+  }, [biblioteca, bibKey]);
   // Ads de las marcas de otros productos, en el formato que usa el bulk.
   const adsDeAjenas = () => ajenas.flatMap(f => (f.ads || []).map(ad => ({ brandNombre: f.nombre, ad })));
 
@@ -3924,14 +3935,21 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
           if (n && compNombres.has(n)) return false;
           return true;
         });
-        let unif = [...competidoresUnif, ...customDeduped].map(b => (biblioteca ? { ...b, __origen: b.__origen || producto.nombre } : b));
+        // Biblioteca general: SIEMPRE todas las marcas de todos los productos,
+        // en el mismo orden, elija el producto que elija. Las que son del
+        // producto elegido se toman "vivas" (se pueden re-scrapear/borrar).
+        let unif;
         if (biblioteca && ajenas.length) {
+          const vivos = new Map([...competidoresUnif, ...customUnif].map(b => [String(b.id), b]));
           const hostDe = (u) => (u || '').replace(/^https?:\/\//, '').replace(/^www\./, '').split('/')[0];
-          const vistos = new Set(unif.flatMap(b => [hostDe(b.landingUrl), (b.nombre || '').toLowerCase().trim()]).filter(Boolean));
+          const vistos = new Set();
+          unif = [];
           for (const f of ajenas) {
             const h = hostDe(f.landingUrl); const n = (f.nombre || '').toLowerCase().trim();
             if ((h && vistos.has(h)) || (n && vistos.has(n))) continue;
             if (h) vistos.add(h); if (n) vistos.add(n);
+            const vivo = f.prodId === String(producto.id) ? vivos.get(String(f.srcId)) : null;
+            if (vivo) { unif.push({ ...vivo, __origen: f.origen }); continue; }
             const staticAds = (f.ads || []).filter(a =>
               (a.imageUrls?.length || 0) > 0 && (a.videoUrls?.length || 0) === 0
               && (!soloProbados || a.daysRunning == null || a.daysRunning >= MIN_DAYS_PROBADO));
@@ -3939,8 +3957,9 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
               lastScraped: f.lastScraped, isCompetidor: f.isCompetidor, __ads: dedupAdsByImage(staticAds),
               __origen: f.origen, __ajena: true });
           }
+        } else {
+          unif = [...competidoresUnif, ...customDeduped].map(b => (biblioteca ? { ...b, __origen: b.__origen || producto.nombre } : b));
         }
-
         // Chips de la biblioteca: origen y +30 días
         if (biblioteca && origenFiltro !== 'todas') unif = unif.filter(b => b.__origen === origenFiltro);
         if (biblioteca && min30) {
@@ -4032,13 +4051,14 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
             )}
 
             {biblioteca && (() => {
-              const origenes = [...new Set([producto.nombre, ...ajenas.map(f => f.origen)].filter(Boolean))];
+              const origenes = [...new Set([...ajenas.map(f => f.origen), producto.nombre].filter(Boolean))];
               const chip = (on) => `px-3.5 py-1.5 rounded-full border text-[12.5px] font-semibold transition ${on
                 ? 'bg-brand-500/15 border-brand-500 text-brand-300'
                 : 'border-[rgba(130,180,255,0.22)] text-gray-300 hover:bg-brand-500/10'}`;
               return (
                 <div className="flex flex-wrap items-center gap-2">
                   <button className={chip(origenFiltro === 'todas')} onClick={() => setOrigenFiltro('todas')}>Todas las marcas</button>
+                  {cargandoBiblio && <span className="inline-flex items-center gap-1.5 text-[12px] text-gray-400"><Loader2 size={12} className="animate-spin" /> Trayendo todas las marcas…</span>}
                   {origenes.map(o => (
                     <button key={o} className={chip(origenFiltro === o)} onClick={() => setOrigenFiltro(origenFiltro === o ? 'todas' : o)}
                       title={`Marcas cargadas en ${o}`}>
@@ -4051,8 +4071,8 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
                     +30 días activo
                   </button>
                   <span className="ml-auto inline-flex items-center gap-1 p-1 rounded-[10px] border border-[rgba(130,180,255,0.22)]">
-                    {[['grilla', 'Grilla', LayoutGrid], ['carriles', 'Carriles', Rows3]].map(([v, l, Ic]) => (
-                      <button key={v} onClick={() => setVistaMarcas(v)} title={v === 'grilla' ? 'Tres marcas por fila' : 'Una marca por fila: deslizá sus anuncios hacia la derecha'}
+                    {[['grilla', 'Hacia abajo', LayoutGrid], ['carriles', 'Hacia la derecha', Columns3]].map(([v, l, Ic]) => (
+                      <button key={v} onClick={() => setVistaMarcas(v)} title={v === 'grilla' ? 'Tres marcas por fila, bajando' : 'Marcas una al lado de la otra: deslizá hacia la derecha para ver más'}
                         className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-[7px] text-[12px] font-semibold transition ${vistaMarcas === v ? 'bg-brand-500/20 text-brand-300' : 'text-gray-400 hover:text-gray-200'}`}>
                         <Ic size={13} /> {l}
                       </button>
@@ -4358,8 +4378,10 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
                 }}
               />
             ) : (
-              <VistaCarrilCtx.Provider value={biblioteca && vistaMarcas === 'carriles'}>
-              <div className={biblioteca && vistaMarcas === 'carriles' ? 'flex flex-col gap-4' : 'grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4'}>
+              <VistaCarrilCtx.Provider value={false}>
+              <div className={biblioteca && vistaMarcas === 'carriles'
+                ? 'flex items-start gap-4 overflow-x-auto pb-3 snap-x [&>*]:w-[400px] [&>*]:max-w-[85vw] [&>*]:shrink-0 [&>*]:snap-start'
+                : 'grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4'}>
                 {unif.map(b => (
                   <BrandCard
                     key={b.id}

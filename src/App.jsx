@@ -3,7 +3,7 @@ import {
   Menu, LogOut, Home, ShoppingCart, Package, Users, AlertCircle, CreditCard,
   UserCheck, TrendingUp, Plus, Filter, Eye, Edit2, Trash2, Calendar, DollarSign,
   ChevronDown, ChevronRight, Search, X, Command, Check, Bell,
-  AlignJustify, LayoutGrid, LayoutGrid as LayoutGridIcon, Columns3, Sparkles, Bot, Zap, Activity, FileText, Settings, Loader2, Calculator, Copy, Save, RotateCcw, Target, Play, Inbox, BarChart3, Instagram, SlidersHorizontal, ClipboardList, AlertTriangle, Trophy, Bookmark, Film, Wallet, Gauge, Rocket, Image as ImageIconKb, Coins, Megaphone, Receipt, ArrowUpRight,
+  AlignJustify, LayoutGrid, LayoutGrid as LayoutGridIcon, Columns3, Sparkles, Bot, Zap, Activity, FileText, Settings, Loader2, Calculator, Copy, Save, RotateCcw, Target, Play, Inbox, BarChart3, Instagram, SlidersHorizontal, ClipboardList, AlertTriangle, Trophy, Bookmark, Film, Wallet, Gauge, Rocket, Image as ImageIconKb, Coins, Megaphone, ArrowUpRight,
 } from 'lucide-react';
 import { VioraLogo, VioraMark, KombialoLogo, KombialoMark } from './logo.jsx';
 import { installDebugLog, exportDebugLog } from './debugLog.js';
@@ -2500,7 +2500,7 @@ function AppShell({ onExit }) {
                   un miembro (cuenta por área) no las ve. */}
               {!currentUser.miembro && (
                 <NavSection title="Finanzas" icon={Coins} sectionKey="kb-finanzas" sidebarOpen={sidebarOpen} defaultOpen={false}>
-                  {['kb-rentabilidad', 'kb-estadisticas', 'kb-externa', 'kb-clientes', 'kb-stock'].map(k => (
+                  {['kb-rentabilidad', 'kb-estadisticas', 'kb-externa', 'kb-clientes', 'kb-stock', 'kb-costos'].map(k => (
                     <NavItem key={k} sub icon={Coins} label={SECCIONES_KOMBIALO[k].titulo} section={k} currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
                   ))}
                 </NavSection>
@@ -2548,7 +2548,6 @@ function AppShell({ onExit }) {
               )}
               {!currentUser.miembro && (
                 <>
-                  <NavItem icon={Receipt} label="Costos" section="kb-costos" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
                   <NavItem icon={CreditCard} label="Suscripción" section="mk-plan" currentSection={currentSection} onSelect={setCurrentSection} sidebarOpen={sidebarOpen} />
                   <a href="https://calculadoraecom.com" target="_blank" rel="noopener noreferrer" title={!sidebarOpen ? 'Calculadora' : undefined}
                     className="w-full flex items-center gap-[11px] px-3 py-2.5 rounded-[10px] text-[#9c9cb8] hover:text-white hover:bg-[#1a1a2a] transition-colors duration-150">

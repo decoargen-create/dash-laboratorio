@@ -20,7 +20,7 @@ export const SECCIONES_KOMBIALO = {
   'kb-ads-carga':       { titulo: 'Nueva carga', grupo: 'Anuncios', desc: 'Subir anuncios nuevos a Meta.' },
   'kb-ads-admin':       { titulo: 'Administrador', grupo: 'Anuncios', desc: 'Tus campañas de Meta, con la ganancia real de cada una.' },
   'kb-ads-auto':        { titulo: 'Automatizaciones', grupo: 'Anuncios', desc: 'Reglas automáticas sobre tus campañas.' },
-  'kb-costos':          { titulo: 'Costos', grupo: null, desc: 'Lo que te cuesta cada producto y los gastos fijos del negocio.' },
+  'kb-costos':          { titulo: 'Costos', grupo: 'Finanzas', desc: 'Lo que te cuesta cada producto y los gastos fijos del negocio.' },
 };
 
 export default function KombialoSeccion({ seccion }) {

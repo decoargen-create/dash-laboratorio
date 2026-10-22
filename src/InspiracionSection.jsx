@@ -1005,6 +1005,9 @@ function AdThumb({ ad, brandNombre, brandId = null, isCompetidor = false, fresh 
 }
 
 
+const VistaCarrilCtx = React.createContext(false);
+const CARRIL_CLS = 'flex gap-2 overflow-x-auto pb-2 snap-x [&>*]:w-[180px] [&>*]:shrink-0 [&>*]:snap-start';
+
 function BrandAdsGrid({ ads, brandNombre, brandId = null, isCompetidor = false, adaptingAdIds, creandoAdIds, seleccionados, selectedOrder, usedAdIds, progressById, onAdapt, onCrearReferencial, onToggleSelect, onSaveToBoard, onClearProgress, onScrape, isScraping, brandTotalAds }) {
   const [showRepeated, setShowRepeated] = useState(false);
   // Paginación: arranca con 30, "ver más" suma de a 60 hasta cap razonable.
@@ -1017,6 +1020,7 @@ function BrandAdsGrid({ ads, brandNombre, brandId = null, isCompetidor = false, 
   const FRESH_LIMIT = Math.min(freshLimit, fresh.length);
   const REPEATED_LIMIT = Math.min(repeatedLimit, repeated.length);
   const PAGE_STEP = 60;
+  const carril = React.useContext(VistaCarrilCtx);
 
   return (
     <div className="mt-3 space-y-3">
@@ -1026,7 +1030,7 @@ function BrandAdsGrid({ ads, brandNombre, brandId = null, isCompetidor = false, 
           <p className="text-[10px] font-bold uppercase tracking-wider text-emerald-700 dark:text-emerald-400 mb-1.5 flex items-center gap-1">
             ✨ Nuevos del día <span className="text-gray-400 font-normal">({fresh.length})</span>
           </p>
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+          <div className={carril ? CARRIL_CLS : 'grid grid-cols-2 sm:grid-cols-3 gap-2'}>
             {fresh.slice(0, FRESH_LIMIT).map(ad => (
               <AdThumb
                 key={ad.id}
@@ -1116,7 +1120,7 @@ function BrandAdsGrid({ ads, brandNombre, brandId = null, isCompetidor = false, 
             Ya vistos ({repeated.length})
           </button>
           {showRepeated && (
-            <div className="mt-2 grid grid-cols-2 sm:grid-cols-3 gap-2 opacity-60">
+            <div className={`mt-2 opacity-60 ${carril ? CARRIL_CLS : 'grid grid-cols-2 sm:grid-cols-3 gap-2'}`}>
               {repeated.slice(0, REPEATED_LIMIT).map(ad => (
                 <AdThumb
                   key={ad.id}
@@ -1186,10 +1190,10 @@ function TopEscaladosBar({ items, adaptingAdIds, creandoAdIds, seleccionados, se
           <span className="text-base">🏆</span>
           <div className="flex-1 min-w-0">
             <p className="text-xs font-bold text-amber-900 dark:text-amber-200">
-              Top {items.length} escalados de tu competencia
+              Top {items.length}: los que más rinden de todas tus marcas
             </p>
             <p className="text-[10px] text-amber-700 dark:text-amber-300/80 truncate">
-              Rankeados por: días corriendo + variantes activas + multiplataforma + popularidad de marca
+              Ordenados por días activos, variantes, plataformas y popularidad de la marca: los que más probablemente venden
             </p>
           </div>
         </button>
@@ -1605,6 +1609,10 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
   // Filtros en chips de la biblioteca (prototipo 2A): de qué producto vino la
   // marca y solo anuncios que ya llevan +30 días activos (probados).
   const [origenFiltro, setOrigenFiltro] = useState('todas');
+  const [vistaMarcas, setVistaMarcas] = useState(() => {
+    try { return localStorage.getItem('adslab-inspiracion-vista') === 'carriles' ? 'carriles' : 'grilla'; } catch { return 'grilla'; }
+  });
+  useEffect(() => { try { localStorage.setItem('adslab-inspiracion-vista', vistaMarcas); } catch { /* sin storage */ } }, [vistaMarcas]);
   const [min30, setMin30] = useState(false);
   const otrosKey = biblioteca ? productos.filter(p => String(p.id) !== String(activeProductoId))
     .map(p => `${p.id}:${(p.competidores || []).length}`).join('|') : '';
@@ -3969,7 +3977,11 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
         }
 
         // Ordenamiento
+        // Las marcas sin anuncios o con pocos (<3) van al final, sea cual sea
+        // el orden elegido (pedido 22/10).
+        const nivel = (b) => { const n = b.__ads?.length || 0; return n === 0 ? 2 : n < 3 ? 1 : 0; };
         unif = [...unif].sort((a, b) => {
+          if (nivel(a) !== nivel(b)) return nivel(a) - nivel(b);
           if (orderBy === 'nombre') return (a.nombre || '').localeCompare(b.nombre || '');
           if (orderBy === 'ads-count') return (b.__ads?.length || 0) - (a.__ads?.length || 0);
           // default 'reciente': lastScraped desc, sin scrape al final
@@ -4038,6 +4050,14 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
                     title="Solo anuncios que ya llevan 30 días o más activos: los que más probablemente venden">
                     +30 días activo
                   </button>
+                  <span className="ml-auto inline-flex items-center gap-1 p-1 rounded-[10px] border border-[rgba(130,180,255,0.22)]">
+                    {[['grilla', 'Grilla', LayoutGrid], ['carriles', 'Carriles', Rows3]].map(([v, l, Ic]) => (
+                      <button key={v} onClick={() => setVistaMarcas(v)} title={v === 'grilla' ? 'Tres marcas por fila' : 'Una marca por fila: deslizá sus anuncios hacia la derecha'}
+                        className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-[7px] text-[12px] font-semibold transition ${vistaMarcas === v ? 'bg-brand-500/20 text-brand-300' : 'text-gray-400 hover:text-gray-200'}`}>
+                        <Ic size={13} /> {l}
+                      </button>
+                    ))}
+                  </span>
                 </div>
               );
             })()}
@@ -4338,7 +4358,8 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
                 }}
               />
             ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+              <VistaCarrilCtx.Provider value={biblioteca && vistaMarcas === 'carriles'}>
+              <div className={biblioteca && vistaMarcas === 'carriles' ? 'flex flex-col gap-4' : 'grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4'}>
                 {unif.map(b => (
                   <BrandCard
                     key={b.id}
@@ -4367,6 +4388,7 @@ export default function InspiracionSection({ addToast, forcedProductoId, embedde
                   />
                 ))}
               </div>
+              </VistaCarrilCtx.Provider>
             )}
           </div>
         );

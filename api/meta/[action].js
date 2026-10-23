@@ -2647,10 +2647,15 @@ async function handleLaunchCampaign(req, res) {
       objective: 'OUTCOME_SALES',
       buying_type: 'AUCTION',
       special_ad_categories: [],
-      bid_strategy: bidStrategy,
       status: estado,
     };
-    if (esCbo) campParams.daily_budget = String(Math.round(presupuesto * 100));
+    // CBO: presupuesto y estrategia de puja van en la campaña. ABO: los dos
+    // van en cada conjunto — una campaña sin presupuesto con bid_strategy la
+    // rechaza Meta ("Campaña sin presupuesto", subcode 1885737).
+    if (esCbo) {
+      campParams.daily_budget = String(Math.round(presupuesto * 100));
+      campParams.bid_strategy = bidStrategy;
+    }
     // ABO: Meta ahora EXIGE declarar si los conjuntos comparten presupuesto
     // (error subcode 4834011 si falta). false = cada conjunto con su plata.
     else campParams.is_adset_budget_sharing_enabled = 'false';
@@ -2689,7 +2694,10 @@ async function handleLaunchCampaign(req, res) {
           targeting_automation: { advantage_audience: 1 },
         },
       };
-      if (!esCbo) adsetParams.daily_budget = String(Math.round(presupuesto * 100));
+      if (!esCbo) {
+        adsetParams.daily_budget = String(Math.round(presupuesto * 100));
+        adsetParams.bid_strategy = bidStrategy;
+      }
       if (estructura !== 'cbo_deep') adsetParams.bid_amount = String(Math.round(pujaDelSet(i) * 100));
       if (startTime) adsetParams.start_time = startTime;
       let adset;
@@ -3346,8 +3354,9 @@ async function handleCreateCampaignStructure(req, res) {
       special_ad_categories: Array.isArray(template.campaign?.specialAdCategories) ? template.campaign.specialAdCategories : [],
       // ABO: el presupuesto vive en cada conjunto, no en la campaña. Meta
       // exige declarar si los conjuntos comparten presupuesto (subcode 4834011).
-      ...(esCbo ? { daily_budget: budgetMinUnit } : { is_adset_budget_sharing_enabled: 'false' }),
-      bid_strategy: bidStrategy,
+      // La estrategia de puja también: en ABO va en cada conjunto (una campaña
+      // sin presupuesto con bid_strategy da subcode 1885737).
+      ...(esCbo ? { daily_budget: budgetMinUnit, bid_strategy: bidStrategy } : { is_adset_budget_sharing_enabled: 'false' }),
     });
     log.push(`✓ Campaña creada: ${camp.id} (${estructura}, pausada hasta el final)`);
 
@@ -3398,7 +3407,10 @@ async function handleCreateCampaignStructure(req, res) {
       if (template.adset?.destinationType) payload.destination_type = template.adset.destinationType;
       // ABO: el presupuesto diario vive en CADA conjunto. Cost/Bid Cap: la
       // puja (en unidad mínima de la moneda) va como bid_amount del conjunto.
-      if (!esCbo) payload.daily_budget = budgetMinUnit;
+      if (!esCbo) {
+        payload.daily_budget = budgetMinUnit;
+        payload.bid_strategy = bidStrategy;
+      }
       if (estructura !== 'cbo_deep') payload.bid_amount = pujaMinUnit;
       if (startTime) payload.start_time = startTime;
       const as = await graphPost(`${accountId}/adsets`, token, payload);
